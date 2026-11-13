@@ -1,0 +1,56 @@
+name: Build and release Windows portable
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build portable zip
+        run: npm run dist
+
+      # Starts the packaged app, opens every screen, saves screenshots and fails the build when a screen
+      # doesn't come up or the page reports an error (STANDARDS.md "Testing").
+      - name: Self-test (packaged app)
+        shell: bash
+        run: |
+          T="$RUNNER_TEMP/cs"; mkdir -p "$T/data" "$T/root" "$T/shots"
+          export CS_SELFTEST="$T/shots" CS_DATA="$T/data" CS_ROOT="$T/root"
+          timeout 240 "dist/Collection Sorter/App/Collection Sorter.exe" || code=$?
+          cat "$T/shots/selftest.log" || echo "no self-test log written"
+          for f in "$T"/data/logs/*.log; do echo "== $f"; tail -n 60 "$f"; done 2>/dev/null || true
+          test -z "$code" || { echo "Self-test failed (exit $code)"; exit 1; }
+
+      - name: Read version
+        id: ver
+        shell: bash
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      # Every push to main publishes the version in package.json as a release (v<version>).
+      # Re-running for the same version replaces its zip.
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: Collection Sorter v${{ steps.ver.outputs.version }}
+          files: dist/*.zip
+          overwrite_files: true

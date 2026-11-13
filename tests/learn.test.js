@@ -1,0 +1,12 @@
+const { train, predict } = require('../engine/learn');
+let seed = 7; const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+const gauss = () => Math.sqrt(-2 * Math.log(rnd() + 1e-9)) * Math.cos(2 * Math.PI * rnd());
+const D = 596, K = 3; const centers = Array.from({ length: K }, () => Array.from({ length: D }, () => gauss() * 0.15));
+const mk = (n) => { const X = [], y = []; for (let i = 0; i < n; i++) { const k = i % K; X.push(Float32Array.from(centers[k], (c) => c + gauss() * 0.5)); y.push(k); } return { X, y }; };
+const tr = mk(4500), te = mk(900);
+let t = Date.now();
+const m = train(tr.X, tr.y, K, tr.y.map(() => 1));
+console.log('train ms', Date.now() - t);
+let ok = 0; te.X.forEach((x, i) => { const p = predict(m, x); if (p.indexOf(Math.max(...p)) === te.y[i]) ok++; });
+console.log('accuracy', (ok / te.X.length).toFixed(3));
+process.exit(ok / te.X.length > 0.9 ? 0 : 1);

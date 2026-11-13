@@ -1,0 +1,22 @@
+{
+  "name": "collection-sorter",
+  "version": "1.5.0",
+  "description": "Review-first sorter for a large art, photo and video collection",
+  "main": "app/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "engine": "node engine/server.js",
+    "test": "node --test tests/decide.test.js tests/groups.test.js tests/knowledge.test.js tests/learn.test.js tests/mover.test.js",
+    "dist": "node scripts/package.js"
+  },
+  "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "onnxruntime-node": "1.30.0",
+    "sharp": "^0.35.5"
+  },
+  "devDependencies": {
+    "electron": "44.9.0"
+  },
+  "electronVersion": "44.9.0"
+}

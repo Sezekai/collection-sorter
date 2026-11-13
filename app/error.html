@@ -1,0 +1,11 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Collection Sorter</title>
+<style>html,body{height:100%;margin:0;background:#0a0a0b;color:#ececee;font:13px/1.5 "Segoe UI",system-ui,sans-serif}
+.tb{height:32px;border-bottom:1px solid #212125;display:flex;align-items:center;padding-left:12px;font-weight:600;font-size:12px;-webkit-app-region:drag}
+.box{max-width:620px;margin:80px auto;background:#111113;border:1px solid #2e2e33;border-radius:10px;padding:18px}
+h1{font-size:15px;margin:0 0 8px}p{color:#a0a0a7;margin:6px 0}code{font:12px Consolas,monospace;color:#ececee;word-break:break-all}
+.acts{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}button{height:28px;padding:0 12px;border-radius:6px;border:1px solid #212125;background:#19191c;color:#ececee;font:600 12.5px "Segoe UI",sans-serif;cursor:pointer}
+button.pri{background:linear-gradient(90deg,#6b98ff,#3fd3f0);color:#0b0c0f;border:0}</style></head>
+<body><div class="tb">Collection Sorter · could not start</div><div class="box"><h1>Collection Sorter could not start</h1><p id="msg"></p><p>The log has the details: <code id="log"></code></p>
+<div class="acts"><button id="open">Open the log</button><button class="pri" id="retry">Try again</button></div></div>
+<script>const q=new URLSearchParams(location.search);document.getElementById('msg').textContent=q.get('msg')||'';document.getElementById('log').textContent=q.get('log')||'';
+document.getElementById('open').onclick=()=>window.csNative&&window.csNative.openLog();document.getElementById('retry').onclick=()=>window.csNative&&window.csNative.restartEngine();</script></body></html>

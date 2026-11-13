@@ -1,0 +1,14 @@
+@import url("fonts/bundled.css");
+/* Fonts used only by the Collection Sorter extras (the older themes). The shared bundled fonts are in fonts/bundled.css. */
+@font-face{font-family:"Instrument Serif";font-weight:400;font-style:normal;font-display:swap;src:url("fonts/instrument-serif-latin-400-normal.woff2") format("woff2")}
+@font-face{font-family:"IBM Plex Mono";font-weight:400;font-style:normal;font-display:swap;src:url("fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2")}
+@font-face{font-family:"IBM Plex Mono";font-weight:600;font-style:normal;font-display:swap;src:url("fonts/ibm-plex-mono-latin-600-normal.woff2") format("woff2")}
+@font-face{font-family:"Lora";font-weight:400;font-style:normal;font-display:swap;src:url("fonts/lora-latin-400-normal.woff2") format("woff2")}
+@font-face{font-family:"Lora";font-weight:600;font-style:normal;font-display:swap;src:url("fonts/lora-latin-600-normal.woff2") format("woff2")}
+@font-face{font-family:"Lora";font-weight:700;font-style:normal;font-display:swap;src:url("fonts/lora-latin-700-normal.woff2") format("woff2")}
+@font-face{font-family:"Nunito";font-weight:400;font-style:normal;font-display:swap;src:url("fonts/nunito-latin-400-normal.woff2") format("woff2")}
+@font-face{font-family:"Nunito";font-weight:600;font-style:normal;font-display:swap;src:url("fonts/nunito-latin-600-normal.woff2") format("woff2")}
+@font-face{font-family:"Nunito";font-weight:700;font-style:normal;font-display:swap;src:url("fonts/nunito-latin-700-normal.woff2") format("woff2")}
+@font-face{font-family:"Playfair Display";font-weight:400;font-style:normal;font-display:swap;src:url("fonts/playfair-display-latin-400-normal.woff2") format("woff2")}
+@font-face{font-family:"Playfair Display";font-weight:600;font-style:normal;font-display:swap;src:url("fonts/playfair-display-latin-600-normal.woff2") format("woff2")}
+@font-face{font-family:"Playfair Display";font-weight:700;font-style:normal;font-display:swap;src:url("fonts/playfair-display-latin-700-normal.woff2") format("woff2")}
