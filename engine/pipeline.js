@@ -182,14 +182,14 @@ function runAnalysis(opts = {}) {
 }
 
 // Look for new files, new example files / folders, and added / renamed / deleted destination folders. Quick: nothing is read by the AI.
-const runRescan = () => job('rescan', async (ctl) => {
+const runRescan = (opts = {}) => job('rescan', async (ctl) => {   // opts.examples === false: only the folders to sort and the destination (the examples library is big and is only looked at when you ask)
   const S = settingsMod.load(); db.open(); reset.cleanup(S);
   emit({ phase: 'scan', note: 'Checking for new files and folders...' });
   const d = db.get(); const folders = () => new Set(d.prepare('select distinct folder f from refs').all().map((r) => r.f));
   const before = folders(); let newFiles = 0, newExamples = 0;
-  if ((S.sources || []).length) newFiles = (await scanSources(S, emit, ctl)).added;
+  if ((S.sources || []).length) newFiles = (await scanSources(S, emit, ctl, { full: !!opts.full })).added;
   if (ctl.cancelled) return { cancelled: true };
-  if ((S.referenceRoots || []).length) newExamples = (await scanReferences(S, emit, ctl)).added;
+  if (opts.examples !== false && (S.referenceRoots || []).length) newExamples = (await scanReferences(S, emit, ctl, { full: !!opts.full })).added;
   const newExampleFolders = [...folders()].filter((f) => !before.has(f));
   const cat = readCatalog(S.destinationRoot, S); const choices = destinationChoices(cat, S);
   destFolders.stashDropped(db.kvGet('rules', null), new Set(cat.folders.filter((f) => !f.ignored && !ROUTED.has(f.name)).map((f) => f.name).concat(subRuleNames(cat, S))));

@@ -5,6 +5,7 @@ const db = require('./db');
 const { fromBlob } = require('./analyze');
 const { assessRow } = require('./quality');
 const { normTag } = require('./models/wd14');
+const { log } = require('./util');
 const learn = require('./learn');
 const classify = require('./classify');
 const { PHOTO_ART } = require('./prompts');
@@ -133,9 +134,21 @@ const W = {
   catchall: { tag: 0.6, knn: 0.8, zs: 0.65 },
 };
 
+function trainOffThread(settings, rules) {
+  return new Promise((resolve) => {
+    let w; try { w = new (require('worker_threads').Worker)(require('path').join(__dirname, 'trainworker.js'), { workerData: { settings, rules } }); } catch (e) { log.warn('training thread failed to start:', e.message); return resolve(); }
+    w.once('message', (m) => { if (!m.ok) log.warn('training thread:', m.error); resolve(); });
+    w.once('error', (e) => { log.warn('training thread error:', e.message); resolve(); });
+    w.once('exit', () => resolve());   // whatever happens, the main thread trains itself if the results aren't there
+  });
+}
 // ---- main ----
 async function decideAll(settings, rules, catalog, deps, onProgress) {
   const d = db.get(); const th = { photo: 0.6, ...settings.thresholds, ...settings.rating };
+  if (!learn.isFresh(rules) || !classify.isFresh()) {   // learning takes seconds with a big examples library: do it off the main thread
+    if (onProgress) onProgress({ phase: 'decide', done: 0, total: 0, note: 'Learning from your examples and corrections…' });
+    await trainOffThread(settings, rules);
+  }
   const L = (settings.rating && settings.rating.learn === false) ? null : learn.prepare(settings, rules);
   const labelOf = new Map(d.prepare('select fp,real from labels').all().map((r) => [r.fp, r.real]));
   const PK = knowledge.build(); // tag fingerprints learned from your example folders
@@ -274,10 +287,12 @@ async function decideAll(settings, rules, catalog, deps, onProgress) {
 
   let done = 0;
   const total = files.length;
-  const BATCH = 200;
-  for (let s = 0; s < files.length; s += BATCH) {
+  // work in slices of about 25 ms and let the app answer clicks in between
+  for (let s = 0; s < files.length;) {
+    const t0 = Date.now(); let e = s;
     db.tx(() => {
-      for (const r of files.slice(s, s + BATCH)) {
+      for (; e < files.length && (e === s || Date.now() - t0 < 25); e++) {
+        const r = files[e];
         const f = parseFile(r); const emb = r.emb ? fromBlob(r.emb) : null;
         const rated = rateFile(r, f, emb, L, th); const rating = rated.rating; let realWhy = '';
         let main = null, lane = 'unsorted', series = null, alt = [], setId = null, fallback = null, fScore = null;
@@ -310,7 +325,7 @@ async function decideAll(settings, rules, catalog, deps, onProgress) {
         upsert.run(r.id, lane, folder, score == null ? null : +score.toFixed(3), reason, lane === 'set' ? 'general' : rating, fallback, fScore == null ? null : +fScore.toFixed(3), fallback ? rating : null, JSON.stringify(alt), series, setId, Date.now());
       }
     });
-    done = Math.min(files.length, s + BATCH);
+    s = e; done = s;
     if (onProgress) onProgress({ phase: 'decide', done, total });
     await new Promise((r) => setImmediate(r));
   }

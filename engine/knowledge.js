@@ -163,8 +163,11 @@ function describe(S, rel, destNames, ignoreTop) {
 }
 
 // Counts per examples folder prefix from the stored examples.
+const countsCache = new Map();   // root -> { sig, out }: going through every example takes a second with a big library
 function countsFor(S, root) {
-  const d = db.get(); const out = new Map(); const add = (rel, learned) => { const o = out.get(rel) || { files: 0, learned: 0 }; o.files++; if (learned) o.learned++; out.set(rel, o); };
+  const d = db.get(); const sig = JSON.stringify(d.prepare('select count(*) c, max(id) m, sum(analyzed=1) a, sum(analyzed=3) s from refs').get());
+  const hit = countsCache.get(root); if (hit && hit.sig === sig) return hit.out;
+  const out = new Map(); countsCache.set(root, { sig, out }); const add = (rel, learned) => { const o = out.get(rel) || { files: 0, learned: 0 }; o.files++; if (learned) o.learned++; out.set(rel, o); };
   for (const r of d.prepare('select path,analyzed from refs').iterate()) {
     const rel = relOf(root, r.path); if (rel === null) continue; const parts = rel.split('/'); parts.pop();
     let acc = ''; for (const p of parts) { acc = acc ? acc + '/' + p : p; add(acc, r.analyzed === 1); }

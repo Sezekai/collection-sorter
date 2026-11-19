@@ -193,11 +193,14 @@ async function api(req, res, u) {
   if (p === '/api/events') {
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
     const push = (type, data) => res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
-    const onP = (e) => push('progress', e), onJ = (e) => push('job', e), onS = (e) => push('sauce', e), onQ = (e) => push('queue', e), onL = (e) => push('log', e);
+    // progress at most 6 times a second (the last one is always sent), so the window isn't kept busy redrawing
+    let pT = 0, pTimer = null, pLast = null, pPhase = null;
+    const onP = (e) => { pLast = e; const now = Date.now(); if (e.finished || e.phase !== pPhase || now - pT >= 160) { pT = now; pPhase = e.phase; clearTimeout(pTimer); pTimer = null; return push('progress', e); } if (!pTimer) pTimer = setTimeout(() => { pTimer = null; pT = Date.now(); push('progress', pLast); }, 160 - (now - pT)); };
+    const onJ = (e) => push('job', e), onS = (e) => push('sauce', e), onQ = (e) => push('queue', e), onL = (e) => push('log', e);
     P.bus.on('progress', onP); P.bus.on('job', onJ); P.bus.on('sauce', onS); P.bus.on('queue', onQ); require('./util').logBus.on('line', onL);
     push('hello', { job: P.state.job, progress: P.state.progress, sauce: { ...P.sauceState }, queue: P.queueInfo(), last: P.state.last });
     const t = setInterval(() => res.write(': ping\n\n'), 20000);
-    req.on('close', () => { clearInterval(t); P.bus.off('progress', onP); P.bus.off('job', onJ); P.bus.off('sauce', onS); P.bus.off('queue', onQ); require('./util').logBus.off('line', onL); });
+    req.on('close', () => { clearInterval(t); clearTimeout(pTimer); P.bus.off('progress', onP); P.bus.off('job', onJ); P.bus.off('sauce', onS); P.bus.off('queue', onQ); require('./util').logBus.off('line', onL); });
     return;
   }
   if (p === '/api/state') {
@@ -373,9 +376,9 @@ async function api(req, res, u) {
   if (p === '/api/switch/preview' && m === 'POST') { try { return send(res, 200, require('./switch').preview(await body(req))); } catch (e) { return send(res, 400, { error: e.message }); } }
   if (p === '/api/switch' && m === 'POST') {
     let r; try { r = require('./switch').apply(await body(req)); } catch (e) { return send(res, 400, { error: e.message }); }
-    P.runRescan().catch(() => {}); return send(res, 200, r);
+    P.runRescan({ examples: false }).catch(() => {}); return send(res, 200, r);
   }
-  if (p === '/api/rescan' && m === 'POST') { P.runRescan().catch(() => {}); return send(res, 200, startedReply()); }
+  if (p === '/api/rescan' && m === 'POST') { const b = await body(req).catch(() => ({})); P.runRescan({ examples: (b || {}).examples !== false, full: !!(b || {}).full }).catch(() => {}); return send(res, 200, startedReply()); }
   if (p === '/api/changes/clear' && m === 'POST') { db.kvSet('changes', null); return send(res, 200, { ok: true }); }
   if (p === '/api/redecide' && m === 'POST') { P.runDecide().catch(() => {}); return send(res, 200, startedReply()); }
   if (p === '/api/job' && m === 'POST') { const b = await body(req); const c = P.state.ctl; if (b.action === 'pause') c.paused = true; if (b.action === 'resume') c.paused = false; if (b.action === 'cancel') { P.cancelAll(); c.paused = false; } return send(res, 200, { ok: true, paused: c.paused }); }
@@ -716,6 +719,8 @@ function crashLog(kind, e) {
 }
 process.on('uncaughtException', (e) => { crashLog('uncaught error', e); });
 process.on('unhandledRejection', (e) => { crashLog('unhandled promise rejection', e); });
+// Notes in the log when the engine was too busy to answer for a while, and what it was doing, so slowness can be traced.
+(() => { let last = Date.now(); setInterval(() => { const now = Date.now(); const lag = now - last - 500; last = now; if (lag > 1000) log.warn(`The engine was busy for ${(lag / 1000).toFixed(1)} s${P.state.job ? ' (' + P.state.job + ')' : ''}; the window waited that long.`); }, 500).unref(); })();
 function startedReply() { const q = P.queueInfo(); return P.state.job && q.length ? { started: false, queued: true, position: q.length, running: P.state.job } : { started: true }; }
 function askMain(msg) {
   if (!process.send) return Promise.resolve({ unsupported: true });
@@ -737,7 +742,7 @@ function start(port = 0) {
   try { const ST = require('./storage'); fs.mkdirSync(ST.logsDir(), { recursive: true }); fs.mkdirSync(ST.cacheDir(), { recursive: true }); } catch { /* a missing drive is reported in Settings → Storage */ }
   // the AI models used to live on C:; when the program sits in an App folder they move next to it once, with progress
   setTimeout(() => { try { const ST = require('./storage'); if (ST.needsModelMove()) { log('Moving the AI models next to the program:', require('path').join(ST.ROOT, 'Models')); P.job('relocate', async (ctl) => { const r = await ST.move('models', require('path').join(ST.ROOT, 'Models'), P.emit, ctl); P.dropModels(); P.emit({ phase: 'done', finished: true, note: 'Models moved to ' + r.dest }); return { moved: r.files }; }, 'Move the AI models to ' + ST.ROOT).catch((e) => log.error('Moving the models failed:', e.message)); } } catch (e) { log.error('model move check failed', e.message); } }, 1500);
-  setTimeout(() => { try { const S0 = settingsMod.load(); if (S0.autoRescan !== false && ((S0.sources || []).length || (S0.referenceRoots || []).length)) P.runRescan().catch((e) => log('rescan failed', e.message)); } catch (e) { log('rescan failed', e.message); } }, 1500);
+  setTimeout(() => { try { const S0 = settingsMod.load(); if (S0.autoRescan !== false && ((S0.sources || []).length || S0.destinationRoot)) P.runRescan({ examples: S0.autoRescan === 'all' }).catch((e) => log('rescan failed', e.message)); } catch (e) { log('rescan failed', e.message); } }, 1500);
   setTimeout(() => { try { require('./tags').ensureBuilt(); } catch (e) { log('tag index failed', e.message); } }, 500);
   const server = http.createServer(async (req, res) => {
     const u = new url.URL(req.url, 'http://127.0.0.1');

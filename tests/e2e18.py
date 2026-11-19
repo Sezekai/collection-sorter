@@ -73,6 +73,19 @@ try:
     check('test files still on disk', len(os.listdir(A+'/Pokemon'))>=1 and len(os.listdir(ROOT+'/src'))>=10)
     thumbs=os.listdir(ROOT+'/data/thumbs') if os.path.exists(ROOT+'/data/thumbs') else []
     check('old thumbnails removed', len(thumbs)<=1, len(thumbs))
+    # ---- checking for changes: examples only when asked, and only folders that changed are listed again
+    shutil.copy(imgs[0], LIB+'/Zelda/new_example.jpg'); shutil.copy(imgs[1], ROOT+'/src2/new_file.jpg')
+    api('/rescan',{'examples':False}); wait(); lr=api('/state')['lastRescan']
+    check('a quick check finds new files but leaves the examples alone', lr['newFiles']==1 and lr['newExamples']==0, lr)
+    api('/rescan',{}); wait(); lr=api('/state')['lastRescan']
+    check('Check for changes now finds the new example', lr['newExamples']==1, lr)
+    api('/rescan',{}); wait(); lr=api('/state')['lastRescan']
+    check('nothing new the second time', lr['newExamples']==0 and lr['newFiles']==0, lr)
+    os.makedirs(LIB+'/Zelda/Deeper',exist_ok=True); shutil.copy(imgs[2], LIB+'/Zelda/Deeper/deep.jpg')
+    api('/rescan',{}); wait(); lr=api('/state')['lastRescan']
+    check('a new subfolder is found too', lr['newExamples']==1, lr)
+    n0=api('/state')['counts']['refs']; api('/reset',{'what':'examples'}); api('/rescan',{}); wait()
+    check('after forgetting the examples everything is listed again', api('/state')['counts']['refs']>=n0-6, (n0, api('/state')['counts']['refs']))
     # ---- UI
     with sync_playwright() as pw:
         b=pw.chromium.launch(); pg=b.new_page(viewport={'width':1500,'height':940}); errs=[]

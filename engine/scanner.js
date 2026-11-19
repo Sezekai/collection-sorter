@@ -4,7 +4,6 @@ const path = require('path');
 const db = require('./db');
 const { kindOf, isJunk, pkey } = require('./util');
 
-const tick = () => new Promise((r) => setImmediate(r));
 
 function skipDir(abs, name, settings, root, excludes) {
   const rel = path.relative(root, abs).replace(/\\/g, '/').toLowerCase();
@@ -21,33 +20,57 @@ function skipDir(abs, name, settings, root, excludes) {
 }
 
 // Walk a folder and yield { abs, size, mtime, kind } for media files.
-async function* walk(root, settings, excludes, topIgnore) {
-  const stack = [root];
-  let n = 0;
+// Never blocks the app: the disk is read asynchronously and the walk pauses every ~25 ms so clicks are answered.
+// With a cache (folder -> its modified time and subfolders from the last full walk), a folder whose modified time hasn't
+// changed is not listed again: Windows updates a folder's modified time whenever a file in it is added, removed or renamed.
+async function* walk(root, settings, excludes, topIgnore, opts = {}) {
+  const fsp = fs.promises; const stack = [root]; let t0 = Date.now();
+  const pause = async () => { if (Date.now() - t0 > 25) { await new Promise((r) => setImmediate(r)); t0 = Date.now(); } };
+  const cache = opts.cache || null, fresh = opts.fresh || null; const wantStat = opts.stat !== false;
   while (stack.length) {
-    const dir = stack.pop();
-    let ents;
-    try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
-    for (const e of ents) {
-      const abs = path.join(dir, e.name);
-      if (e.isDirectory()) {
-        if (dir === root && topIgnore && topIgnore.has(e.name.toLowerCase())) continue;
-        if (!skipDir(abs, e.name, settings, root, excludes)) stack.push(abs);
-      } else if (e.isFile()) {
-        if (isJunk(e.name)) continue;
-        const kind = kindOf(e.name);
-        if (!kind) continue;
-        let st; try { st = fs.statSync(abs); } catch { continue; }
-        yield { abs, size: st.size, mtime: st.mtimeMs, kind };
-        if (++n % 500 === 0) await tick();
+    const dir = stack.pop(); const rel = path.relative(root, dir).replace(/\\/g, '/') || '.';
+    let dst; try { dst = await fsp.stat(dir); } catch { continue; }
+    const c = cache && cache[rel]; let subs;
+    if (c && c.m === dst.mtimeMs) subs = c.s;
+    else {
+      let ents; try { ents = await fsp.readdir(dir, { withFileTypes: true }); } catch { continue; }
+      subs = []; const files = [];
+      for (const e of ents) { if (e.isDirectory()) subs.push(e.name); else if (e.isFile() && !isJunk(e.name)) { const kind = kindOf(e.name); if (kind) files.push([path.join(dir, e.name), kind]); } }
+      for (let i = 0; i < files.length; i += 16) {
+        const part = files.slice(i, i + 16);
+        const sts = wantStat ? await Promise.all(part.map(([abs]) => fsp.stat(abs).catch(() => null))) : part.map(() => ({ size: null, mtimeMs: null }));
+        for (let j = 0; j < part.length; j++) { if (!sts[j]) continue; yield { abs: part[j][0], size: sts[j].size, mtime: sts[j].mtimeMs, kind: part[j][1] }; }
+        await pause();
       }
     }
+    if (fresh) fresh[rel] = { m: dst.mtimeMs, s: subs };
+    for (const name of subs) {
+      if (dir === root && topIgnore && topIgnore.has(name.toLowerCase())) continue;
+      const abs = path.join(dir, name);
+      if (!skipDir(abs, name, settings, root, excludes)) stack.push(abs);
+    }
+    await pause();
   }
 }
 
+// The walk cache is trusted only while nothing else changed what was found before: the same settings for what is scanned,
+// the same number of rows in the table it fills, and less than a week old. Otherwise everything is listed again.
+const WEEK = 7 * 24 * 3600 * 1000;
+function walkKey(settings, kind) {
+  const S = settings; return JSON.stringify(kind === 'src' ? [(S.sources || []).map((x) => [x.path, x.excludes]), S.ignoreSubfolders, S.destinationRoot] : [S.referenceRoots, S.referenceMap, S.ignoreFolders, S.ignoreSubfolders, S.dupesFolder]);
+}
+const rowCount = (kind) => (kind === 'src' ? db.get().prepare('select count(*) c from files').get().c : db.get().prepare('select (select count(*) from refs) + (select count(*) from refs_extra) c').get().c);
+function loadWalkCache(settings, kind, full) {
+  if (full) return null;
+  const c = db.kvGet('walk_' + kind, null);
+  if (!c || c.key !== walkKey(settings, kind) || c.rows !== rowCount(kind) || Date.now() - c.ts > WEEK) return null;
+  return c.roots || {};
+}
+function saveWalkCache(settings, kind, roots) { db.kvSet('walk_' + kind, { key: walkKey(settings, kind), rows: rowCount(kind), ts: Date.now(), roots }); }
+
 // Add files from the configured sources. Existing paths are left alone.
-async function scanSources(settings, onProgress, ctl) {
-  const d = db.get();
+async function scanSources(settings, onProgress, ctl, opts = {}) {
+  const d = db.get(); const cache = loadWalkCache(settings, 'src', opts.full); const fresh = {}; let complete = true;
   const ins = d.prepare(`insert or ignore into files(path,pkey,source,size,mtime,kind,ext) values(?,?,?,?,?,?,?)`);
   let seen = 0, added = 0;
   const destRoot = settings.destinationRoot ? pkey(settings.destinationRoot) : null;
@@ -55,8 +78,9 @@ async function scanSources(settings, onProgress, ctl) {
     if (!src.path || !fs.existsSync(src.path)) continue;
     let batch = [];
     const flush = () => { if (!batch.length) return; db.tx(() => { for (const r of batch) { const res = ins.run(...r); if (res.changes) added++; } }); batch = []; };
-    for await (const f of walk(src.path, settings, src.excludes)) {
-      if (ctl && ctl.cancelled) break;
+    fresh[src.path] = {};
+    for await (const f of walk(src.path, settings, src.excludes, null, { cache: cache && cache[src.path], fresh: fresh[src.path] })) {
+      if (ctl && ctl.cancelled) { complete = false; break; }
       // never pick up files that are already inside the destination tree
       if (destRoot && pkey(f.abs).startsWith(destRoot + '/')) continue;
       seen++;
@@ -64,8 +88,9 @@ async function scanSources(settings, onProgress, ctl) {
       if (batch.length >= 400) { flush(); if (onProgress) onProgress({ phase: 'scan', seen, added }); }
     }
     flush();
-    if (ctl && ctl.cancelled) break;
+    if (ctl && ctl.cancelled) { complete = false; break; }
   }
+  if (complete) saveWalkCache(settings, 'src', fresh);
   if (onProgress) onProgress({ phase: 'scan', seen, added, done: true });
   return { seen, added };
 }
@@ -85,8 +110,8 @@ function refTargetsFor(rel, settings) {
 }
 function refFolderFor(rel, settings) { return refTargetsFor(rel, settings)[0] || null; }
 
-async function scanReferences(settings, onProgress, ctl) {
-  const d = db.get();
+async function scanReferences(settings, onProgress, ctl, opts = {}) {
+  const d = db.get(); const cache = loadWalkCache(settings, 'ref', opts.full); const fresh = {}; let complete = true;
   const ins = d.prepare(`insert or ignore into refs(path,folder,kind,label) values(?,?,?,?)`);
   const insX = d.prepare('insert or ignore into refs_extra(ref_id,folder) select id,? from refs where path=?');
   const top = new Set((settings.ignoreFolders || []).map((s) => s.toLowerCase()));
@@ -95,9 +120,10 @@ async function scanReferences(settings, onProgress, ctl) {
     if (!fs.existsSync(root)) continue;
     let batch = [];
     const flush = () => { if (!batch.length) return; db.tx(() => { for (const r of batch) { if (ins.run(r[0], r[1], r[2], r[3]).changes) added++; for (const x of r[4] || []) insX.run(x, r[0]); } }); batch = []; };
-    for await (const f of walk(root, settings, [], top)) {
-      if (ctl && ctl.cancelled) break;
-      if (++checked % 300 === 0 && !(require('./settings').load().referenceRoots || []).includes(root)) break; // removed while scanning
+    fresh[root] = {};
+    for await (const f of walk(root, settings, [], top, { stat: false, cache: cache && cache[root], fresh: fresh[root] })) {
+      if (ctl && ctl.cancelled) { complete = false; break; }
+      if (++checked % 300 === 0 && !(require('./settings').load().referenceRoots || []).includes(root)) { complete = false; break; } // removed while scanning
       const rel = path.relative(root, f.abs).replace(/\\/g, '/');
       const targets = refTargetsFor(rel, settings).filter((x) => x.toLowerCase() !== String(settings.dupesFolder || 'dupes').toLowerCase());
       const folder = targets[0];
@@ -109,7 +135,9 @@ async function scanReferences(settings, onProgress, ctl) {
       if (batch.length >= 400) { flush(); if (onProgress) onProgress({ phase: 'refscan', seen, added }); }
     }
     flush();
+    if (ctl && ctl.cancelled) { complete = false; break; }
   }
+  if (complete) saveWalkCache(settings, 'ref', fresh);
   if (onProgress) onProgress({ phase: 'refscan', seen, added, done: true });
   return { seen, added };
 }

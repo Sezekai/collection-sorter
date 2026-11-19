@@ -127,7 +127,7 @@ let db = null;
 function open(file) {
   if (db) return db;
   db = new DatabaseSync(file || path.join(DATA_DIR, 'sorter.db'));
-  db.exec('pragma journal_mode = wal; pragma synchronous = normal; pragma foreign_keys = off;');
+  db.exec('pragma journal_mode = wal; pragma synchronous = normal; pragma foreign_keys = off; pragma busy_timeout = 15000;');   // the training worker has its own connection
   db.exec(SCHEMA);
   migrate(db);
   return db;

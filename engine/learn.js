@@ -5,7 +5,7 @@
 const path = require('path');
 const db = require('./db');
 const fromBlob = (b) => new Float32Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
-const { normTag } = require('./models/wd14');
+const normTag = (t) => t.toLowerCase().replace(/\\/g, '').replace(/_/g, ' ').trim();   // same as models/wd14 (not required here so the training worker doesn't load the AI runtime)
 
 const NSFW_TAGS = ['pussy', 'penis', 'sex', 'vaginal', 'anal', 'fellatio', 'cum', 'cum in pussy', 'cumshot', 'ejaculation', 'spread pussy', 'uncensored', 'erection', 'testicles', 'oral', 'paizuri', 'handjob', 'hetero', 'nipples', 'anus', 'clitoris', 'semen', 'penetration', 'sex from behind', 'missionary', 'cowgirl position', 'bukkake', 'fingering', 'masturbation', 'censored', 'mosaic censoring', 'bar censor', 'pussy juice', 'spread legs', 'nude', 'completely nude', 'topless', 'bottomless', 'areolae', 'breasts out', 'no panties', 'no bra', 'cameltoe', 'pubic hair', 'panties', 'underwear', 'lingerie', 'bra', 'bikini', 'swimsuit', 'cleavage', 'large breasts', 'huge breasts', 'underboob', 'sideboob', 'naked', 'covered nipples', 'see-through', 'groin', 'ass', 'butt crack', 'thong', 'bare breasts', 'pantyshot', 'upskirt', 'micro bikini', 'slingshot swimsuit', 'nipple slip', 'naked towel', 'naked apron', 'navel', 'thighs', 'shirtless', 'bondage', 'bdsm', 'tentacles', 'ahegao', 'open mouth', 'sweat', 'blush'];
 const REAL_TAGS = ['realistic', 'photorealistic', 'photo (medium)', 'real life', '3d', 'monochrome', 'greyscale', 'lips', 'solo', '1girl', '1boy', 'blurry', 'depth of field', 'blurry background', 'looking at viewer', 'portrait', 'outdoors', 'indoors', 'sunglasses', 'no humans', 'sketch', 'traditional media', 'painting (medium)', 'watercolor (medium)', 'pixel art', 'comic', 'text focus', 'scenery', 'cosplay', 'wig', 'real world location', 'lens flare'];
@@ -135,9 +135,13 @@ function fitOne(samples, feat, label, K, wkey) {
 }
 
 // Returns { nsfw, real } predictors (or null when there is not enough to learn from) and a summary for the UI.
-function prepare(settings, rules) {
+function sigOf(rules) {
   const d = db.get();
-  const sig = JSON.stringify([d.prepare(`select count(*) c from refs where analyzed=1`).get().c, d.prepare('select count(*) c from labels').get().c, d.prepare(`select count(*) c from suggestions where user_rating is not null`).get().c, d.prepare(`select count(*) c from files where status='moved'`).get().c, Object.keys((rules && rules.folders) || {}).length]);
+  return JSON.stringify([d.prepare(`select count(*) c from refs where analyzed=1`).get().c, d.prepare('select count(*) c from labels').get().c, d.prepare(`select count(*) c from suggestions where user_rating is not null`).get().c, d.prepare(`select count(*) c from files where status='moved'`).get().c, Object.keys((rules && rules.folders) || {}).length]);
+}
+const isFresh = (rules) => { const c = db.kvGet('learned', null); return !!c && c.sig === sigOf(rules); };
+function prepare(settings, rules) {
+  const sig = sigOf(rules);
   let cache = db.kvGet('learned', null);
   if (!cache || cache.sig !== sig) {
     const S = gather(settings, rules);
@@ -166,4 +170,4 @@ function heuristic(r, g) {
   return { nsfw: clamp(Math.max(e + q + 0.25 * s, tn * 0.95, tv)), very: clamp(Math.max(e, tv * 0.95)) };
 }
 
-module.exports = { prepare, heuristic, featNsfw, featReal, NSFW_TAGS, REAL_TAGS, train, predict };
+module.exports = { prepare, isFresh, heuristic, featNsfw, featReal, NSFW_TAGS, REAL_TAGS, train, predict };

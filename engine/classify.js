@@ -68,9 +68,13 @@ function fit(S, feat, minEach = 15) {
 }
 
 // Everything needed to give the two opinions for a picture. Build once per run, then call opinions() per picture.
-function prepare(settings, rules, refs) {
+function sigOf() {
   const d = db.get();
-  const sig = JSON.stringify([d.prepare('select count(*) c from refs where analyzed=1').get().c, d.prepare('select count(*) c from labels').get().c, d.prepare(`select count(*) c from files where status='moved'`).get().c, d.prepare(`select count(*) c from files where jtags is not null`).get().c > 0]);
+  return JSON.stringify([d.prepare('select count(*) c from refs where analyzed=1').get().c, d.prepare('select count(*) c from labels').get().c, d.prepare(`select count(*) c from files where status='moved'`).get().c, d.prepare(`select count(*) c from files where jtags is not null`).get().c > 0]);
+}
+const isFresh = () => { const c = db.kvGet('classifier', null); return !!c && c.sig === sigOf(); };
+function prepare(settings, rules, refs) {
+  const sig = sigOf();
   let cache = db.kvGet('classifier', null);
   if (!cache || cache.sig !== sig) {
     const S = gather(settings, rules);
@@ -128,4 +132,4 @@ function finalP(op, model) {
   if (c == null) return j; if (j == null) return c; return (c + j) / 2;
 }
 
-module.exports = { realOfFolder, prepare, scoreboard, chooseModel, finalP, joyPrior, clipPrior, mapOf, REAL_TAG };
+module.exports = { isFresh, realOfFolder, prepare, scoreboard, chooseModel, finalP, joyPrior, clipPrior, mapOf, REAL_TAG };
