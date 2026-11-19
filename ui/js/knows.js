@@ -86,7 +86,8 @@ views.knows = {
     const data = await api('/knowledge'); const rules = data.rules; this.sel = this.sel && rules.folders[this.sel] ? this.sel : data.folders[0] && data.folders[0].name; this.filter = this.filter || 'all';
     const byName = Object.fromEntries(data.folders.map((f) => [f.name, f]));
     el.innerHTML = `<h1>What it knows</h1><p class="sub">Every folder, what the app currently believes belongs in it, and where that belief comes from. Look at what a folder collects now, remove or add what it looks for, then press <b>Save &amp; re-sort</b>: only pictures you haven’t approved or moved yet are re-decided.</p>
-      <div class="knows"><div class="kleft"><input type="text" id="kq" placeholder="Search folders…"><div class="row wrap" id="kf" style="margin:6px 0"></div><div class="klist" id="klist"></div></div><div class="kright" id="kdetail"></div></div>`;
+      <div class="knows"><div class="kleft" id="kleftp"><input type="text" id="kq" placeholder="Search folders…"><div class="row wrap" id="kf" style="margin:6px 0"></div><div class="klist" id="klist"></div></div><div class="kright" id="kdetail"></div></div>`;
+    addResizer($('#kleftp'), 'kl', 'right');
     const flt = [['all', 'All'], ['has', 'Has pictures'], ['attn', 'Needs attention'], ['noex', 'No examples']];
     const attn = (f) => f.enabled && (f.guess > 0 || (f.pending >= 5 && f.avg !== null && f.avg < 0.5) || (!f.profile && f.type !== 'catchall' && f.examples < 4 && f.pending > 0));
     const drawList = () => {

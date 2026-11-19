@@ -1,11 +1,11 @@
 
 // ---------- panels: every side panel can be made wider / narrower and collapsed ----------
-const PANELS = { nav: { v: '--navw', min: 56, max: 360, def: 196 }, sb: { v: '--sbw', min: 170, max: 560, def: 230 }, vs: { v: '--vsw', min: 260, max: 720, def: 300 } };
+const PANELS = { nav: { v: '--navw', min: 56, max: 440, def: 240 }, sb: { v: '--sbw', min: 170, max: 640, def: 260 }, vs: { v: '--vsw', min: 260, max: 820, def: 340 }, sec: { v: '--secw', min: 150, max: 560, def: 250 }, kl: { v: '--klw', min: 200, max: 700, def: 320 } };
 function setPanelW(key, w, save = true) {
   const p = PANELS[key]; w = Math.round(Math.max(p.min, Math.min(p.max, w)));
   PREFS.widths = PREFS.widths || {}; PREFS.widths[key] = w;
   document.documentElement.style.setProperty(p.v, w + 'px');
-  if (key === 'nav') document.body.classList.toggle('navnarrow', w < 120);
+  if (key === 'nav') document.body.classList.toggle('navnarrow', w < 130);
   if (save) savePrefs();
 }
 function applyPanelPrefs() { for (const k of Object.keys(PANELS)) setPanelW(k, (PREFS.widths || {})[k] ?? PANELS[k].def, false); }
@@ -26,7 +26,7 @@ const SCREEN_NAMES = { setup: 'Setup', review: 'Art', real: 'Real life', unsorte
 function buildNav() {
   const a = ([id, l, sub]) => `<a href="#${id}" data-r="${id}" class="${sub ? 'sub' : ''}" title="${esc(l)}">${icon(id)}<span>${l}</span><em class="nb" data-nb="${id}"></em></a>`;
   $('#nav').innerHTML = `<div class="brand"><span class="logo"><svg viewBox="0 0 24 24">${ICONS.logo}</svg></span><span>Collection Sorter</span></div><div class="navlist">${NAV.map((n) => `${n[0] === 'review' ? `<div class="navgrp" id="navgrp" title="Art and real photos / videos are reviewed separately">${icon('review')}<span>Review</span><em>▾</em></div>` : ''}${a(n)}`).join('')}</div>
-    <div class="grow"></div><div class="navlist">${a(['look', 'Look'])}${a(['settings', 'Settings'])}<a href="#" id="navkeys" title="Keyboard shortcuts (K)">${icon('keys')}<span>Keys</span></a><a href="#" id="navlog" title="The log (L)">${icon('log')}<span>Log</span></a></div><div id="navstats" class="navstats"></div>`;
+    <div class="grow"></div><div class="navlist navbottom">${a(['look', 'Look'])}${a(['settings', 'Settings'])}<a href="#" id="navkeys" title="Keyboard shortcuts (K)">${icon('keys')}<span>Keys</span></a><a href="#" id="navlog" title="The log (L)">${icon('log')}<span>Log</span></a></div><div id="navstats" class="navstats"></div>`;
   $('#navgrp').onclick = () => { PREFS.revOpen = PREFS.revOpen === false; document.body.classList.toggle('revshut', PREFS.revOpen === false); savePrefs(); };
   document.body.classList.toggle('revshut', PREFS.revOpen === false);
   $('#navtoggle').innerHTML = icon('menu');
@@ -54,7 +54,7 @@ function shortcutsDialog() {
   const keys = (k) => k.split(' ').map((x) => (x === '+' || x === '/' && k.length > 1 && k !== '/' ? `<span class="faint">${esc(x)}</span>` : `<kbd>${esc(x)}</kbd>`)).join('');
   const grp = (t, rows) => `<div class="kgrp"><h3>${t}</h3>${rows.map(([k, d]) => `<div class="krow"><span class="ks">${keys(k)}</span><span class="kd">${esc(d)}</span></div>`).join('')}</div>`;
   modal(`<div class="keyshead"><h1>Keyboard shortcuts</h1><span>K or Esc closes</span></div><div class="keycols">
-    ${grp('Anywhere', [['K', 'These shortcuts'], ['S', 'Settings'], ['L', 'Open or close the log'], ['M', 'Show or hide the side menu'], ['H', 'Hide the folder panel, then everything, then show it all again'], ['F', 'Full screen (F11 too)'], ['Ctrl + Z', 'Undo the last move'], ['Esc', 'Close a dialog, the log or the viewer']])}
+    ${grp('Anywhere', [['K', 'These shortcuts'], ['S', 'Settings'], ['L', 'Open or close the log'], ['M', 'Show or hide the side menu'], ['H', 'Hide the folder panel, then everything, then show it all again'], ['F', 'Full screen (F11 too)'], ['Ctrl + Z', 'Undo the last move'], ['Ctrl + =', 'Everything bigger (Ctrl and plus)'], ['Ctrl + −', 'Everything smaller'], ['Ctrl + 0', 'Everything back to 100%'], ['Esc', 'Close a dialog, the log or the viewer']])}
     ${grp('On a list of pictures', [['Click', 'Select one'], ['Ctrl + Click', 'Add to or take from the selection'], ['Shift + Click', 'Select a range'], ['Drag', 'Draw a box to select many'], ['Ctrl + A', 'Select everything shown'], ['Esc', 'Deselect all'], ['/', 'Jump to the folder box (with pictures selected)'], ['Ctrl + F', 'Jump to the search box'], ['A', 'Approve the selected (they move straight away)'], ['R', 'Reject the selected'], ['Q', 'Find higher quality on / off'], ['P', 'Move to the other side (Art ⇄ Real life)'], ['T', 'Open the viewer'], ['Ctrl + Wheel', 'Bigger or smaller pictures'], ['Ctrl + Shift + Wheel', 'Cards: more or fewer columns']])}
     ${grp('In the viewer', [['← →', 'Previous / next'], ['PgUp PgDn', 'Previous / next'], ['Home End', 'First / last'], ['A', 'Approve (moves it)'], ['R', 'Reject'], ['X', 'Select or deselect this picture'], ['Q', 'Find higher quality on / off'], ['P', 'Move to the other side'], ['/', 'Jump to the folder box'], ['↑ ↓', 'Zoom in / out (volume on a video)'], ['+ −', 'Zoom'], ['0', 'Fit'], ['1', 'Actual size'], ['Space', 'Play / pause a video'], ['U', 'Mute / unmute a video'], ['I', 'Show or hide the side panel'], ['H', 'Just the picture'], ['T Esc', 'Close the viewer']])}
     ${grp('Dialogs', [['Enter', 'Confirm'], ['Esc', 'Cancel']])}

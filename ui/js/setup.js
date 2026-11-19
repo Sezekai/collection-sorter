@@ -14,6 +14,7 @@ const RESETS = [
   { what: 'everything', title: 'Start completely fresh', text: 'Clears the file list, everything learned, suggestions, sets, duplicates and assignments. Your settings, the downloaded models and the move history are kept.', btn: 'Start fresh', danger: true },
 ];
 views.setup = {
+  sec: null,
   async render(el) {
     await refreshState(); await loadChoices();
     const defs = await api('/settings/defaults'); const di = await api('/datainfo').catch(() => ({}));
@@ -32,8 +33,8 @@ views.setup = {
     const tagBanner = `<div class="card" id="chcard"><div class="row wrap"><h2 style="margin:0">New or changed folders &amp; files</h2><span class="grow"></span><span class="small muted">${LR ? 'Last checked ' + new Date(LR.ts || LR).toLocaleString() : 'Not checked yet'}${s.autoRescan === false ? ' · automatic check at start is off' : ' · checked automatically each time the app starts'}</span></div>
       <p class="small" style="margin:6px 0">${T.files ? `<b>${fmtNum(T.files)}</b> file(s) not scanned and tagged yet` : 'No unscanned files'} · ${T.refs ? `<b>${fmtNum(T.refs)}</b> example picture(s) not learned from yet` : 'No unlearned example pictures'}${T.refsMore ? ` · ${fmtNum(T.refsMore)} more example pictures are waiting (each Learn press takes a fresh batch)` : ''}.</p>
       ${chLines.length ? `<ul class="small" style="margin:4px 0 8px 18px">${chLines.map((x) => `<li>${x}</li>`).join('')}</ul>` : ''}
-      ${S.folderChanges > 0 ? `<div class="row wrap" style="margin:0 0 8px"><span class="chip warn">${S.folderChanges} destination folder(s) can no longer be found</span><button id="fcopen">Renamed, merged or deleted? Sort it out…</button></div>` : ''}<div class="row wrap"><button id="chcheck">${qlab('Check for changes now')}</button><button id="chlearn" title="Learn from example pictures that are new or not yet used">${qlab('Learn from new examples only')}</button><button id="chscan" title="Scan and tag only files not yet processed">${qlab('Scan & tag new files only')}</button><button class="pri" id="chboth">${qlab('Do both')}</button>${chLines.length ? '<button class="ghost sm" id="chclear">Dismiss list</button>' : ''}</div></div>
-      <div class="card" id="destcard"><h2 style="margin:0 0 6px">Subfolders as separate destinations</h2><p class="small muted">Tick any folder, however deep, inside your destination folders to make it its own target (like Real/Videos/General). New, renamed and deleted folders are noticed when the app checks for changes.</p><div id="desttree" class="small muted">Loading…</div></div>`;
+      ${S.folderChanges > 0 ? `<div class="row wrap" style="margin:0 0 8px"><span class="chip warn">${S.folderChanges} destination folder(s) can no longer be found</span><button id="fcopen">Renamed, merged or deleted? Sort it out…</button></div>` : ''}<div class="row wrap"><button id="chcheck">${qlab('Check for changes now')}</button><button id="chlearn" title="Learn from example pictures that are new or not yet used">${qlab('Learn from new examples only')}</button><button id="chscan" title="Scan and tag only files not yet processed">${qlab('Scan & tag new files only')}</button><button class="pri" id="chboth">${qlab('Do both')}</button>${chLines.length ? '<button class="ghost sm" id="chclear">Dismiss list</button>' : ''}</div></div>`;
+    const destTree = `<div class="card" id="destcard"><h2 style="margin:0 0 6px">Subfolders as separate destinations</h2><p class="small muted">Tick any folder, however deep, inside your destination folders to make it its own target (like Real/Videos/General). New, renamed and deleted folders are noticed when the app checks for changes.</p><div id="desttree" class="small muted">Loading…</div></div>`;
     const pr = S.problems || { files: [], refs: [] };
     const CL = S.classifier || {}; const sbp = (k) => { const x = (CL.scoreboard || {})[k] || {}; return `<td>${fmtNum(x.checked || 0)}</td><td>${fmtNum(x.wrong || 0)}</td><td>${x.accuracy == null ? '–' : Math.round(x.accuracy * 100) + '%'}</td>`; };
     const sbCard = `<div class="card"><h2 style="margin:0 0 6px">Art or real life — how the two AIs are doing</h2><p class="small muted">Each time you press P (move to the other side), the app notes which AI got that picture wrong. Right now <b>${esc({ both: 'both averaged', clip: 'CLIP', joytag: 'JoyTag' }[CL.using] || CL.using || 'both averaged')}</b> decides${CL.joytag ? '' : '; <b>JoyTag is not downloaded yet</b> (use “Download models” below), so only CLIP is used'}.</p><table class="logtable"><tr><th>AI</th><th>Your corrections it saw</th><th>Wrong</th><th>Right</th></tr><tr><td>CLIP</td>${sbp('clip')}</tr><tr><td>JoyTag</td>${sbp('joytag')}</tr></table><p class="small muted">${fmtNum((CL.scoreboard || {}).corrections || 0)} correction(s) so far. ${S.counts ? fmtNum(S.counts.art_pending || 0) + ' pending in Art, ' + fmtNum(S.counts.real_pending || 0) + ' in Real life.' : ''}</p></div>`;
@@ -48,28 +49,35 @@ views.setup = {
       else input = `<input type="number" data-path="${f.path}" value="${val}" step="${f.step}" min="${f.min}" max="${f.max}">`;
       return `<div class="field" data-tipid="${f.path}" style="${f.wide ? 'grid-column:1/-1' : ''}"><label>${esc(f.label)} <i class="info">i</i></label><div class="in">${input}<button class="ghost rs sm" data-def="${f.path}" title="Back to the recommended value">↺</button></div><div class="def">Recommended: ${esc(f.rec)}</div></div>`;
     };
-    el.innerHTML = `
-      <h1>Setup</h1><p class="sub">Tell the app where your files are, where they should end up, and let it read them. Approving a picture moves it straight away (and you can put it back from the Undo screen). Changes here are saved automatically.</p>
-      <div class="card"><h2 style="margin-top:0">1. Folders to sort (sources)</h2>
+    const nsrc = (s.sources || []).length; const nref = (s.referenceRoots || []).length;
+    const parts = [
+      ['sources', '1. Folders to sort', nsrc ? `${nsrc} folder${nsrc === 1 ? '' : 's'}` : 'None yet', !nsrc, `<div class="card"><div class="row"><h2 style="margin:0">Folders to sort (sources)</h2><span class="grow"></span><button id="swopen2">Change folders…</button></div>
         ${srcRows || '<p class="muted">No source folders yet.</p>'}
-        <div class="row" style="margin-top:8px"><button id="addsrc">Add folder…</button><span class="small muted">Any number of folders; subfolders are included. Removing a folder here also forgets its files (the files themselves are never touched).</span></div></div>
-      <div class="card"><h2 style="margin-top:0">2. Destination (where the sorted folders live)</h2>
-        <div class="pathrow"><input type="text" id="dest" value="${esc(s.destinationRoot || '')}"><button class="ghost" id="pickdest">Browse…</button></div>
-        <p class="small muted">Test run: <code>E:\\Pictures\\Sorting Test</code>. Real run: <code>E:\\Pictures\\Temporary</code>.</p></div>
-      <div class="card"><h2 style="margin-top:0">3. Examples to learn from (optional, read-only)</h2>
-        <p class="small muted">Files already in the right folders teach the app what each folder looks like. They are never moved or changed. The app only learns from a sample of each folder (see “Examples learned per folder” below), so a huge folder is fine — and removing a folder here forgets everything learned from it.</p>
+        <div class="row" style="margin-top:8px"><button id="addsrc">Add folder…</button><span class="small muted">Any number of folders; subfolders are included. Removing a folder here also forgets its files (the files themselves are never touched).</span></div></div>`],
+      ['dest', '2. Destination', s.destinationRoot ? s.destinationRoot.split(/[\\/]/).filter(Boolean).pop() : 'Not set', !s.destinationRoot, `<div class="card"><div class="row"><h2 style="margin:0">Destination (where the sorted folders live)</h2><span class="grow"></span><button class="pri" id="swopen">Change folders…</button></div>
+        <div class="pathrow" style="margin-top:8px"><input type="text" id="dest" value="${esc(s.destinationRoot || '')}"><button class="ghost" id="pickdest">Browse…</button></div>
+        <p class="small muted"><b>Moving to another destination, or from test files to real ones?</b> Use <b>Change folders…</b>: it checks the new folder against what the app knows, carries the rules, ranking, examples and what it knows about each folder across, and can forget the old files and their history.</p></div>${destTree}`],
+      ['examples', '3. Examples to learn from', `${fmtNum(c.refs_done)} learned`, false, `<div class="card"><h2 style="margin-top:0">Examples to learn from (optional, read-only)</h2>
+        <p class="small muted">Files already in the right folders teach the app what each folder looks like. They are never moved or changed. The app only learns from a sample of each folder (see “Examples learned per folder” in Settings), so a huge folder is fine — and removing a folder here forgets everything learned from it.</p>
         ${refRows}${keptRows}<div class="row wrap" style="margin-top:8px"><button id="addref" class="ghost">Add examples folder…</button><a class="btnlink" href="#examples">Choose subfolders &amp; where each goes →</a>
-        <span class="small muted">${fmtNum(c.refs)} example files found · ${fmtNum(c.refs_done)} learned · ${fmtNum(c.refs_skipped)} skipped (sampling)</span><span class="grow"></span><button class="ghost sm" data-reset="examples">Forget all learned examples</button></div></div>
-      ${tagBanner}${learnCard}
-      <div class="card"><h2 style="margin-top:0">4. AI models</h2>
+        <span class="small muted">${fmtNum(c.refs)} example files found · ${fmtNum(c.refs_done)} learned · ${fmtNum(c.refs_skipped)} skipped (sampling)</span><span class="grow"></span><button class="ghost sm" data-reset="examples">Forget all learned examples</button></div></div>`],
+      ['changes', '4. New and changed', (T.files || T.refs || S.folderChanges) ? 'Something to do' : 'Up to date', !!(S.folderChanges > 0), tagBanner],
+      ['models', '5. AI models', S.modelsReady ? 'Ready' : 'Not downloaded', !S.modelsReady, `<div class="card"><h2 style="margin-top:0">AI models</h2>
         ${S.modelsReady ? `<p><span class="chip ok">Ready</span> <span class="small muted">${S.provider ? 'Running on ' + (S.provider === 'dml' ? 'your graphics card (DirectML)' : S.provider) + '.' : 'Loaded when the first scan starts.'}</span> <button class="ghost sm" id="testmodels">Test the AI models</button></p>${S.modelNote ? `<div class="card warnbox"><b>Heads up:</b> ${esc(S.modelNote)}</div>` : ''}<div id="modeltest" class="small"></div>${probCard}`
-          : `<p><span class="chip warn">Not downloaded</span> About 1.7 GB in total (tagger, CLIP and JoyTag), one time, into <code>${esc(di.modelDir || '')}</code>. They run on your graphics card through DirectML, so no extra drivers are needed.</p><button class="pri" id="dlmodels">Download the AI models (about 1.7 GB)</button>`}</div>
-      ${sbCard}
-      <div class="card"><h2 style="margin-top:0">5. Learn and scan</h2>
+          : `<p><span class="chip warn">Not downloaded</span> About 1.7 GB in total (tagger, CLIP and JoyTag), one time, into <code>${esc(di.modelDir || '')}</code>. They run on your graphics card through DirectML, so no extra drivers are needed.</p><button class="pri" id="dlmodels">Download the AI models (about 1.7 GB)</button>`}</div>`],
+      ['learn', '6. Learn and scan', `${fmtNum(c.analyzed)} of ${fmtNum(c.files)} read`, false, `<div class="card"><h2 style="margin-top:0">Learn and scan</h2>
         <p class="small muted">Two separate steps. <b>Learn from examples</b> reads a sample of your example folders and teaches the app what each folder looks like (it does not touch your new files). <b>Scan &amp; tag files</b> finds the new files, reads and tags every picture and video with the chosen model, finds duplicates and sets, and prepares suggestions. Both can be paused or cancelled and pick up where they stopped.${S.retag ? ` <b>${fmtNum(S.retag)} pictures were tagged by a different model</b> and will be read again with the chosen one on the next scan, so the new tags replace the old.` : ''}</p>
         <div class="row wrap"><button id="learn">${qlab('Learn from examples')}</button><button id="run">${qlab('Scan & tag files')}</button><button class="pri" id="runboth">${qlab('Do both')}</button><button id="redecide">${qlab('Re-run suggestions only')}</button></div>
-        <p class="small muted" style="margin-top:8px">${fmtNum(c.refs_done)} examples learned · ${fmtNum(c.analyzed)} of ${fmtNum(c.files)} files read${c.failed ? `, ${c.failed} unreadable` : ''}</p></div>
-      <div class="card"><div class="row"><span class="small muted">Options, where your data is stored, the graphics card and Reset are on the <a href="#settings">Settings</a> screen (S). The look is on <a href="#look">Look</a>.</span></div></div>`;
+        <p class="small muted" style="margin-top:8px">${fmtNum(c.refs_done)} examples learned · ${fmtNum(c.analyzed)} of ${fmtNum(c.files)} files read${c.failed ? `, ${c.failed} unreadable` : ''}</p></div>`],
+      ['learned', '7. What it has learned', L ? 'NSFW, Very, art or real' : 'Nothing yet', false, `${learnCard}${sbCard}`],
+    ];
+    if (!parts.some((x) => x[0] === this.sec)) this.sec = (parts.find((x) => x[3]) || parts[0])[0];
+    el.innerHTML = `<h1>Setup</h1><p class="sub">Tell the app where your files are, where they should end up, and let it read them. Approving a picture moves it straight away (and you can put it back from the Undo screen). Changes here are saved automatically. Options, storage, the graphics card and Reset are in <a href="#settings">Settings</a> (S); the look is on <a href="#look">Look</a>.</p>
+      <div class="secpage"><div class="card secnav" id="setupnav"><div class="flist">${parts.map(([id, t, hint, warn]) => `<div class="fitem sitem ${id === this.sec ? 'on' : ''}" data-part="${id}"><span>${esc(t)}<small class="${warn ? 'warnc' : ''}">${esc(hint)}</small></span></div>`).join('')}</div></div>
+        <div class="secbody">${parts.map(([id, , , , html]) => `<div class="spart ${id === this.sec ? '' : 'hidden'}" data-partbody="${id}">${html}</div>`).join('')}</div></div>`;
+    $$('[data-part]').forEach((x) => (x.onclick = () => { this.sec = x.dataset.part; $$('[data-part]').forEach((y) => y.classList.toggle('on', y === x)); $$('[data-partbody]').forEach((y) => y.classList.toggle('hidden', y.dataset.partbody !== this.sec)); $('#view').scrollTop = 0; }));
+    addResizer($('#setupnav'), 'sec', 'right');
+    $('#swopen').onclick = () => changeFolders(); $('#swopen2').onclick = () => changeFolders();
     $('#device') && 0;
     const collect = () => {
       const o = clone(S.settings);
@@ -134,3 +142,52 @@ views.setup = {
   },
 };
 
+
+// ---------- Change folders: another destination and/or other folders to sort, keeping what the app learned ----------
+async function changeFolders(pre) {
+  await refreshState(); const s = S.settings;
+  const st = pre || { dest: s.destinationRoot || '', sources: (s.sources || []).map((x) => ({ ...x, keep: true })) };
+  const draw = () => {
+    modal(`<h1>Change folders</h1><p class="muted">Point the app at another destination or other folders to sort. Everything it knows about a destination folder is kept under the folder’s name, so a destination with the same layout carries straight on. The next step shows exactly what carries over before anything changes.</p>
+      <h2>Destination</h2><div class="pathrow"><input type="text" id="sw_dest" value="${esc(st.dest)}" placeholder="For example E:\\Pictures\\Temporary"><button id="sw_pick">Browse…</button></div>
+      ${s.destinationRoot ? `<p class="small faint">Now: <code>${esc(s.destinationRoot)}</code></p>` : ''}
+      <h2>Folders to sort</h2><div class="mlist">${st.sources.map((x, i) => `<label class="swopt"><input type="checkbox" data-swsrc="${i}" ${x.keep ? 'checked' : ''}><span><code>${esc(x.path)}</code>${x.isNew ? ' <span class="chip ok">new</span>' : ''}<br><span class="small faint">${x.keep ? 'Kept' : 'Removed: the app forgets its files (they stay on disk)'}</span></span></label>`).join('') || '<p class="small muted">None yet.</p>'}</div>
+      <div class="row" style="margin-top:6px"><button id="sw_addsrc">${icon('plus')}Add folder…</button></div>
+      <div class="acts"><button class="ghost" id="sw_cancel">Cancel</button><button class="pri" id="sw_next">Check what carries over</button></div>`, null, 'switch');
+    $('#sw_dest').oninput = (e) => { st.dest = e.target.value; };
+    $('#sw_pick').onclick = async () => { const r = await api('/pick-folder', {}); if (r.path) { st.dest = r.path; draw(); } else if (r.unsupported) toast('The folder picker only works in the app window. Type the path instead.', true); };
+    $('#sw_addsrc').onclick = async () => { const r = await api('/pick-folder', {}); if (r.path) { st.sources.push({ path: r.path, excludes: [], keep: true, isNew: true }); draw(); } else if (r.unsupported) toast('The folder picker only works in the app window.', true); };
+    $$('[data-swsrc]').forEach((c) => (c.onchange = () => { st.sources[+c.dataset.swsrc].keep = c.checked; draw(); }));
+    $('#sw_cancel').onclick = closeModal;
+    $('#sw_next').onclick = async () => { st.dest = $('#sw_dest').value.trim(); let pv; try { pv = await api('/switch/preview', { dest: st.dest, sources: st.sources.filter((x) => x.keep) }); } catch (e) { return toast(e.message, true); } review(pv); };
+  };
+  const review = (pv) => {
+    const F = pv.folders, K = pv.knowledge, O = pv.old; const destChanged = pv.oldDest.toLowerCase() !== pv.newDest.toLowerCase();
+    const opts = (cur) => `<option value="">Keep what it knows (folder made when needed)</option><option value="__forget" ${cur === '__forget' ? 'selected' : ''}>Forget what it knows about it</option>${F.choices.map((c) => `<option value="${esc(c)}" ${cur === c ? 'selected' : ''}>Carry it over to: ${esc(c)}</option>`).join('')}`;
+    const match = F.total ? `${fmtNum(F.same + F.renamed.length)} of ${fmtNum(F.total)}` : '0';
+    modal(`<h1>Change folders: what carries over</h1>
+      <p class="muted"><code>${esc(pv.oldDest || '(none)')}</code> → <code>${esc(pv.newDest)}</code></p>
+      <div class="swstat"><div><b>${match}</b>folder names match${F.missing.length ? '' : ' — everything lines up'}</div><div><b>${fmtNum(K.ranked)}</b>folders keep their rules and place in the priority order</div><div><b>${fmtNum(K.examples)}</b>learned examples across ${fmtNum(K.exampleFolders)} folders</div><div><b>${K.learned ? 'Kept' : '—'}</b>what it learned about NSFW, Very and art or real</div></div>
+      <p class="small muted">Also kept: ${fmtNum(K.mappings)} examples-folder mapping${K.mappings === 1 ? '' : 's'}, ${fmtNum(K.series)} series assignment${K.series === 1 ? '' : 's'}, your settings and the AI models. The examples folders (${K.exampleRoots.map((x) => `<code>${esc(x)}</code>`).join(', ') || 'none'}) don’t change.</p>
+      ${F.renamed.length ? `<h2>Same folder, different capitals (${F.renamed.length})</h2><p class="small muted">Carried over automatically.</p><div class="swlist">${F.renamed.map((r) => `<div class="swrow"><span>${esc(r.from)}</span><span class="k">→</span><span>${esc(r.to)}</span></div>`).join('')}</div>` : ''}
+      ${F.missing.length ? `<h2>Not in the new destination (${F.missing.length})</h2><p class="small muted">Say what each one became. Nothing is lost if you keep it: the folder is made the first time something is approved into it.</p><div class="swlist">${F.missing.map((m) => `<div class="swrow"><span><b>${esc(m.name)}</b><br><span class="k">${m.rank ? '#' + m.rank + ' in the order · ' : ''}${fmtNum(m.examples)} examples</span></span><span class="k">→</span><select data-swmap="${esc(m.name)}">${opts(m.suggest)}</select></div>`).join('')}</div>` : ''}
+      ${F.added.length ? `<h2>Only in the new destination (${F.added.length})</h2><p class="small muted">They get a starting rule and go just before the catch-all folders; add examples so the app learns them.</p><p class="small">${F.added.map(esc).join(' · ')}</p>` : ''}
+      ${O.files || O.history ? `<h2>The old setup</h2>
+        <label class="swopt"><input type="checkbox" id="sw_forget" checked><span><b>Forget the old files</b> — ${fmtNum(O.files)} file record${O.files === 1 ? '' : 's'} (${fmtNum(O.moved)} already moved${destChanged ? ' into the old destination' : ''}, ${fmtNum(O.fresh)} waiting for review), their thumbnails, previews, duplicates, sets and suggestions, and the history of ${fmtNum(O.history)} move${O.history === 1 ? '' : 's'}.<br><span class="small faint">Nothing on disk is touched. Moves made in the old setup can no longer be undone from the app afterwards.</span></span></label>
+        ${O.movedLearnable ? `<label class="swopt" style="margin-left:24px"><input type="checkbox" id="sw_keepappr" checked><span><b>Keep what your approvals taught it</b> — the ${fmtNum(O.movedLearnable)} pictures you approved become learned examples for their folders (they were already read, so nothing is read again).</span></label>` : ''}` : ''}
+      ${pv.busy ? `<p class="warnline">A job is running. Changing folders waits until it has finished, or stop it first.</p>` : ''}
+      <div class="acts"><button class="ghost" id="sw_back">Back</button><button class="pri" id="sw_go">Change folders</button></div>`, null, 'switch');
+    const fg = $('#sw_forget'), ka = $('#sw_keepappr'); if (fg && ka) fg.onchange = () => { ka.disabled = !fg.checked; };
+    $('#sw_back').onclick = () => draw();
+    $('#sw_go').onclick = async () => {
+      const map = {}; $$('[data-swmap]').forEach((x) => { if (x.value === '__forget') map[x.dataset.swmap] = ''; else if (x.value) map[x.dataset.swmap] = x.value; });
+      const body = { dest: pv.newDest, sources: st.sources.filter((x) => x.keep).map((x) => ({ path: x.path, excludes: x.excludes || [] })), map, forget: fg ? fg.checked : false, keepApprovals: ka ? ka.checked : false };
+      let r; try { r = await api('/switch', body); } catch (e) { return toast(e.message, true); }
+      closeModal(); await refreshState();
+      const bits = [r.filesForgotten ? `forgot ${fmtNum(r.filesForgotten)} old file records and ${fmtNum(r.historyForgotten)} moves` : '', r.examplesKept ? `kept ${fmtNum(r.examplesKept)} approvals as examples` : '', r.renamed ? `carried ${r.renamed} folder name${r.renamed === 1 ? '' : 's'} over` : ''].filter(Boolean);
+      toast(`Folders changed${bits.length ? ': ' + bits.join(', ') : ''}. Checking the new folders now; then use Learn and scan.`);
+      views.setup.sec = 'learn'; if (curRoute() === 'setup') views.setup.render($('#view')); else location.hash = '#setup';
+    };
+  };
+  draw();
+}

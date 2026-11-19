@@ -9,7 +9,8 @@ views.settings = {
     await refreshState(); const secs = this.sections(); if (!secs.some((x) => x.id === this.sec)) this.sec = 'storage';
     el.innerHTML = `<h1>Settings</h1><p class="sub">Changes apply straight away. Hover the ⓘ next to a setting for what it does and a good value.</p>
       ${S.safeMode ? `<div class="banner"><b>Safe mode</b><span>The app closed unexpectedly twice in a row, so it started with the graphics card off.</span><span class="grow"></span><button class="pri" id="st_safeoff">Turn the graphics card back on</button></div>` : ''}
-      <div class="knows" style="grid-template-columns:220px minmax(0,1fr)"><div class="card kleft" style="padding:6px"><div class="flist">${secs.map((x) => `<div class="fitem ${x.id === this.sec ? 'on' : ''}" data-sec="${x.id}"><span>${esc(x.title)}</span></div>`).join('')}</div></div><div id="st_body" style="display:flex;flex-direction:column;gap:8px;min-width:0"></div></div>`;
+      <div class="secpage"><div class="card secnav" id="settingsnav"><div class="flist">${secs.map((x) => `<div class="fitem sitem ${x.id === this.sec ? 'on' : ''}" data-sec="${x.id}"><span>${esc(x.title)}</span></div>`).join('')}</div></div><div id="st_body" class="secbody"></div></div>`;
+    addResizer($('#settingsnav'), 'sec', 'right');
     $$('[data-sec]').forEach((x) => (x.onclick = () => { this.sec = x.dataset.sec; this.render(el); }));
     const so = $('#st_safeoff'); if (so) so.onclick = async () => { if (await confirmBox('Turn the graphics card back on?', 'The app restarts with the graphics card on. If it closes unexpectedly again, run Settings → GPU → Diagnose.', 'Restart')) await api('/safemode/off', {}); };
     const body = $('#st_body'); const sec = secs.find((x) => x.id === this.sec);

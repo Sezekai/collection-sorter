@@ -272,6 +272,7 @@ document.addEventListener('keydown', (e) => {
   const modalOpen = !$('#modal').classList.contains('hidden'); const viewing = viewerOpen();
   if (e.ctrlKey && k === 'z' && !modalOpen) { used(); return undoLastMove(); }
   if (e.ctrlKey && k === 'f' && !modalOpen) { used(); if (viewing) return fbOpenFor('#v_folder'); const q = $('#rq'); if (q) { q.focus(); q.select(); } return; }
+  if (e.ctrlKey && !e.altKey && ['=', '+', '-', '_', '0'].includes(e.key)) { used(); return stepScale(e.key === '0' ? 0 : e.key === '-' || e.key === '_' ? -1 : 1); }   // Look → Sizes → Overall size
   if (e.ctrlKey && k !== 'a') return;
   if (k === 'k') { used(); return shortcutsDialog(); }
   if (modalOpen) { if (k === 'escape') { used(); closeModal(); } else if (k === 'enter' && $('#cbok')) { used(); $('#cbok').click(); } else if (k.length === 1) used(); return; }

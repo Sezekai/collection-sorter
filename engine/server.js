@@ -370,6 +370,11 @@ async function api(req, res, u) {
   if (p === '/api/models/download' && m === 'POST') { P.downloadModels().catch(() => {}); return send(res, 200, startedReply()); }
   if (p === '/api/run' && m === 'POST') { const b = await body(req); P.runAnalysis(b).catch(() => {}); return send(res, 200, startedReply()); }
   if (p === '/api/learn' && m === 'POST') { const b = await body(req); P.runAnalysis({ files: false, refs: true, refsOpts: { folders: b.folders || null, relearn: !!b.relearn } }).catch(() => {}); return send(res, 200, startedReply()); }
+  if (p === '/api/switch/preview' && m === 'POST') { try { return send(res, 200, require('./switch').preview(await body(req))); } catch (e) { return send(res, 400, { error: e.message }); } }
+  if (p === '/api/switch' && m === 'POST') {
+    let r; try { r = require('./switch').apply(await body(req)); } catch (e) { return send(res, 400, { error: e.message }); }
+    P.runRescan().catch(() => {}); return send(res, 200, r);
+  }
   if (p === '/api/rescan' && m === 'POST') { P.runRescan().catch(() => {}); return send(res, 200, startedReply()); }
   if (p === '/api/changes/clear' && m === 'POST') { db.kvSet('changes', null); return send(res, 200, { ok: true }); }
   if (p === '/api/redecide' && m === 'POST') { P.runDecide().catch(() => {}); return send(res, 200, startedReply()); }

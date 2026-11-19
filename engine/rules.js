@@ -2,7 +2,7 @@
 // Rules = what the app knows about each folder and the ranking it walks. Stored in the database so edits survive.
 const { SERIES, OTHER, CATCHALL } = require('./seed');
 
-const ROUTED = new Set(['Average & LQ', 'Connected Art', 'Dupes', 'Real', 'Photographs (Environments & Landscapes)', 'Photographs (People, Objects & Other Stuff)', 'Football', 'Games - Screenshots & Videos', 'Gifs & Vids', 'Animations & Anime Videos']);
+const ROUTED = new Set(['Average & LQ', 'Connected Art', 'Dupes', 'Real', 'Photographs (Environments & Landscapes)', 'Photographs (People, Objects & Other Stuff)', 'Football', 'Games - Screenshots & Videos', 'Gifs & Vids', 'Animations & Anime Videos', 'Find Higher Quality Manually']);
 const SPECIAL = {
   'Manga-Style and B&W': { type: 'mono', tags: ['monochrome', 'greyscale', 'sketch', 'lineart', 'comic', 'screentone', 'manga (style)', 'ink (medium)'], prompts: ['a black and white manga page', 'a monochrome ink drawing', 'a greyscale illustration'], threshold: 0.7, notes: 'All monochrome / greyscale / black-and-white art. Always ranked first.' },
   'Manga': { type: 'style', tags: ['manga', 'comic', 'speech bubble', 'screentone', 'translation request', 'page number', 'multiple views'], prompts: ['a manga page with panels and speech bubbles', 'a coloured manga page', 'a manga chapter page'], threshold: 0.6, notes: 'Manga pages (colour ones that are not B&W).' },

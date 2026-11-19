@@ -154,12 +154,12 @@ function merge(action) {
       let base = wasNew ? srcRules[0] : rules.folders[to] || srcRules[0]; const rest = wasNew ? srcRules.slice(1) : srcRules;
       for (const r of rest) base = mergeRule(base, r);
       rules.folders[to] = base;
-      if (!rules.order.includes(to)) { const idx = from.map((f) => (stash[f] ? stash[f].idx : -1)).filter((i) => i >= 0)[0]; rules.order.splice(idx >= 0 ? Math.min(idx, rules.order.length) : rules.order.length, 0, to); }
+      if (!rules.order.includes(to)) { const idx = from.map((f) => (stash[f] ? stash[f].idx : rules.order.indexOf(f))).filter((i) => i >= 0)[0]; /* the new name takes the old one's place in the order */ rules.order.splice(idx >= 0 ? Math.min(idx, rules.order.length) : rules.order.length, 0, to); }
     }
     for (const [a, b] of pairs) {
-      if (norm(a) === norm(b)) continue;
+      if (a === b) continue; /* a change of capitals only is still a rename */
       if (b !== to && keep.rules) { const r = stash[a] ? stash[a].rule : rules.folders[a]; if (r && !rules.folders[b]) { rules.folders[b] = r; if (!rules.order.includes(b)) rules.order.push(b); } }
-      delete rules.folders[a]; rules.order = rules.order.filter((x) => norm(x) !== norm(a));
+      delete rules.folders[a]; rules.order = rules.order.filter((x) => x === b || norm(x) !== norm(a));
     }
     db.kvSet('rules', rules);
   }

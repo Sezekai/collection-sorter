@@ -141,10 +141,14 @@ async function selfTest() {
     if (!ok) errs.push(`screen ${r} did not come up properly`);
     try { const img = await win.webContents.capturePage(); fs.writeFileSync(path.join(dir, `screen-${r}.png`), img.toPNG()); } catch (e) { say('screenshot failed: ' + e.message); }
   }
+  try { // Look → Sizes → Overall size zooms the real window (Ctrl + =)
+    const [w0, w1] = await win.webContents.executeJavaScript(`new Promise((r) => { const w = innerWidth; stepScale(1); setTimeout(() => { const w2 = innerWidth; stepScale(0); r([w, w2]); }, 500); })`);
+    const zok = w1 < w0 - 20; say(`${zok ? 'OK  ' : 'FAIL'} overall size: page width ${w0} -> ${w1} at 110%`); if (!zok) errs.push('Overall size did not zoom the window');
+  } catch (e) { errs.push('zoom check failed: ' + e.message); }
   say(errs.length ? 'ERRORS:\n' + errs.join('\n') : 'No errors.');
   quitting = true; app.exit(errs.length ? 1 : 0);
 }
-ipcMain.on('cs-titlebar', (e, c) => { try { if (win && c) win.setTitleBarOverlay({ color: c.color || OVERLAY.color, symbolColor: c.symbolColor || OVERLAY.symbolColor, height: OVERLAY.height }); } catch { /* not supported here */ } });
+ipcMain.on('cs-titlebar', (e, c) => { try { if (win && c) win.setTitleBarOverlay({ color: c.color || OVERLAY.color, symbolColor: c.symbolColor || OVERLAY.symbolColor, height: Math.max(24, Math.min(90, Math.round(c.height || OVERLAY.height))) }); } catch { /* not supported here */ } });
 ipcMain.on('cs-fullscreen', () => { if (win) win.setFullScreen(!win.isFullScreen()); });
 ipcMain.on('cs-openlog', () => shell.openPath(logFile));
 ipcMain.on('cs-restart', async () => { restarting = true; try { if (engine) engine.kill(); } catch { /* gone */ } await new Promise((r) => setTimeout(r, 400)); restarting = false; await boot(); });

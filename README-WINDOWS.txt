@@ -10,6 +10,8 @@ COLLECTION SORTER (portable)
    - set the destination folder (test: E:\Pictures\Sorting Test),
    - download the models once (about 1.8 GB with the default EVA02-Large tag model; SwinV2 is 0.5 GB and faster),
    - add "Scan & analyse" to the queue. You can add more jobs while one runs; they wait their turn.
+   Moving from test folders to your real ones later: Setup > Destination > "Change folders...". It keeps the rules, the
+   priority order, the examples and what the app knows about each folder, and can forget the test files and their history.
 4. Review on the Review screens. Approving a picture (A) MOVES IT AT ONCE; Ctrl+Z puts the last one back, and the
    Undo screen puts anything back. Press K anywhere for the keyboard shortcuts.
 
@@ -17,7 +19,7 @@ WHERE THINGS ARE
 - Settings, learned data, move history and appearance: %LOCALAPPDATA%\Collection Sorter (small thumbnails too).
 - AI models: E:\Pictures\Collection Sorter\Models.  Cache (contact sheets): E:\Pictures\Collection Sorter\Cache.
 - Settings > Storage shows every location with its size, and can open, move or clear each one.
-- Look (in the side menu) changes the theme, colours, fonts, corners and density; themes can be exported and imported.
+- Look (in the side menu) changes the sizes (Ctrl + plus / minus / 0 too), theme, colours, fonts and corners; themes can be exported and imported.
 
 UPDATING
 Unzip the new version over the old one (replace App\). Settings, models and everything you've taught it stay.

@@ -40,6 +40,7 @@ try:
         a=pg.locator('#tlist .fitem').count(); pg.select_option('#trealm','real'); pg.wait_for_timeout(1200); r=pg.locator('#tlist .fitem').count()
         check('tags realm selector', a>0 and r>0, (a,r))
         pg.goto(f'{base}/?t=t#setup'); pg.wait_for_timeout(1500)
+        pg.click('[data-part="learned"]'); pg.wait_for_timeout(200)
         check('setup shows scoreboard', 'how the two AIs are doing' in pg.inner_text('#view'))
         pg.goto(f'{base}/?t=t#settings'); pg.wait_for_timeout(1200); pg.click('[data-sec="realart"]'); pg.wait_for_timeout(600)
         check('settings show the art-or-real options', pg.locator('[data-path="classify.model"]').count()==1 and pg.locator('[data-path="tagSource.real"]').count()==1)

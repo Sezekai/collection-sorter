@@ -5,7 +5,7 @@ Review-first sorter for a large art, photo and video collection. It reads every 
 ## For users
 
 1. Download `CollectionSorter-v<version>-win-x64.zip` from the latest release and unzip it into, for example, `E:\Pictures`. The program is `E:\Pictures\Collection Sorter\App\Collection Sorter.exe`. No install needed.
-2. On **Setup**: add your source folders, set the destination folder, download the models once (about 1.8 GB), and add **Scan & analyse** to the queue.
+2. On **Setup** (its sections are listed on the left): add your source folders, set the destination folder, download the models once (about 1.8 GB), and add **Scan & tag files** to the queue.
 3. Review on the Review screens. **Approve** (A) moves a file at once; **Reject** (R) keeps it where it is. Ctrl+Z undoes the last move, and **Undo** puts back anything. Press **K** for every shortcut.
 
 `READ ME FIRST.txt` in the zip has the same steps, plus where everything is stored.
@@ -16,9 +16,15 @@ Review-first sorter for a large art, photo and video collection. It reads every 
 - **Title bar:** the screen name, and pills for anything running. A pill shows its full text when there's room; when it's cut short, click it for everything.
 - **Status bar:** what's running (bar, %, time taken, time left), the GPU load, Pause and Stop, and **Finished: …** with the next step when a job ends. Jobs queue: adding one while another runs puts it in line.
 - **Review views:** Grid, Masonry, Cards and List (sortable columns). The viewer has no overlays: the panel on the right holds the details, folder, rating and Approve/Reject.
-- **Look:** themes (save, rename, duplicate, export, import), background and accent colours, fonts (bundled, system or your own), text size, corners, density, buttons and outlines.
+- **Look:** **Sizes** (a preset, an overall size, and separate sizes for the text, screen titles, menu text and icons, the logo, other icons, buttons and fields, and rows; Ctrl + = / − / 0 anywhere), themes (save, rename, duplicate, export, import), background and accent colours, fonts (bundled, system or your own), corners, buttons and outlines. Sizes stay the same whichever theme you pick.
 - **Settings:** every option, **Storage** (each location with its size: open, move, clear), **GPU** (Auto, GPU, CPU), **Diagnose and repair**, and resets.
 - **Log (L):** opens a drawer with the live log; it opens itself on an error.
+
+## Changing folders (for example from test files to the real ones)
+
+Setup → Destination → **Change folders…** picks the new destination and the folders to sort, then shows what carries over before anything changes. The app keeps everything it knows about a destination folder under the folder's name, so a destination with the same layout carries straight on: the rules and priority order, which examples teach which folder, what it knows about each folder, the series assignments, the examples-folder mappings and what it learned about NSFW, Very and art or real. Names that differ only in capitals are matched automatically; for a folder the new destination doesn't have, you choose what it became, forget it, or keep it (it's made when first needed).
+
+It can also forget the old setup: the old files' records, thumbnails, previews, duplicates, sets, suggestions and move history (nothing on disk is touched; those moves can't be undone from the app afterwards). Your approvals in the old destination can be kept as learned examples, so what they taught the app isn't lost.
 
 ## Where things are stored
 

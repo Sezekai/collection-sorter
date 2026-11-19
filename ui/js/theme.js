@@ -120,10 +120,10 @@
       accent: { stops, angle: clamp(t.accent && t.accent.angle, 0, 360, 90), onAccent: on === 'dark' || on === 'light' ? on : 'auto' },
       font: {
         family: typeof (t.font && t.font.family) === 'string' && t.font.family.trim() ? t.font.family.trim().slice(0, 80) : d.font.family,
-        size: clamp(t.font && t.font.size, 11, 16, d.font.size),
+        size: clamp(t.font && t.font.size, 11, 22, d.font.size),
       },
       corners: { control: clamp(t.corners && t.corners.control, 0, 16, d.corners.control), panel: clamp(t.corners && t.corners.panel, 0, 24, d.corners.panel) },
-      density: { control: clamp(t.density && t.density.control, 24, 44, d.density.control), row: clamp(t.density && t.density.row, 20, 40, d.density.row) },
+      density: { control: clamp(t.density && t.density.control, 24, 56, d.density.control), row: clamp(t.density && t.density.row, 20, 52, d.density.row) },
       buttons: { style: t.buttons && t.buttons.style === 'glow' ? 'glow' : 'flat' },
       outline: { colour: color(t.outline && t.outline.colour, ''), width: clamp(t.outline && t.outline.width, 1, 4, 2) },
       highlight: { colour: color(t.highlight && t.highlight.colour, '') },

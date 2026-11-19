@@ -4,7 +4,37 @@
 //  Kept in appearance.json in the data folder. Theme files are the suite's shared *.theme.json.
 // =====================================================================================
 const T = window.Theme;
-const LOOK = { current: T.normalize(T.DEFAULT_THEME), activeId: 'default', saved: [] };
+const LOOK = { current: T.normalize(T.DEFAULT_THEME), activeId: 'default', saved: [], sizes: null };
+// Sizes are the app's own (not part of a theme), so switching themes never makes everything smaller or bigger.
+const SIZE_PRESETS = {
+  small: { name: 'Small', text: 13, heading: 125, menuText: 13, menuIcon: 16, brand: 26, icon: 15, control: 28, row: 24 },
+  medium: { name: 'Medium', text: 14, heading: 130, menuText: 15, menuIcon: 19, brand: 32, icon: 16, control: 32, row: 28 },
+  large: { name: 'Large', text: 15, heading: 135, menuText: 16, menuIcon: 21, brand: 38, icon: 18, control: 36, row: 30 },
+  xlarge: { name: 'Extra large', text: 17, heading: 140, menuText: 18, menuIcon: 24, brand: 44, icon: 20, control: 40, row: 34 },
+};
+const SIZE_FIELDS = [['text', 'Text', 11, 22, 'px', 'Buttons, lists, drop-downs, fields and most other text'], ['heading', 'Screen titles', 110, 180, '%', 'How much bigger the title of each screen is than the text'],
+  ['menuText', 'Menu text', 11, 24, 'px', 'The side menu'], ['menuIcon', 'Menu icons', 14, 32, 'px', 'The icons in the side menu'], ['brand', 'Logo and name', 22, 60, 'px', 'Collection Sorter at the top of the menu'],
+  ['icon', 'Other icons', 12, 28, 'px', 'Icons in buttons and the title bar'], ['control', 'Buttons and fields', 24, 56, 'px', 'How tall buttons, drop-downs and boxes are'], ['row', 'Rows', 20, 52, 'px', 'Rows in lists and tables']];
+const DEFAULT_SIZES = () => ({ preset: 'large', scale: 100, ...Object.fromEntries(Object.entries(SIZE_PRESETS.large).filter(([k]) => k !== 'name')) });
+function normSizes(z) {
+  const d = DEFAULT_SIZES(); const o = { ...d, ...(z || {}) };
+  for (const [k, , lo, hi] of SIZE_FIELDS) { const v = Number(o[k]); o[k] = Number.isFinite(v) ? Math.max(lo, Math.min(hi, Math.round(v))) : d[k]; }
+  o.scale = Math.max(70, Math.min(200, Math.round(Number(o.scale) || 100)));
+  o.preset = Object.keys(SIZE_PRESETS).find((k) => SIZE_FIELDS.every(([f]) => SIZE_PRESETS[k][f] === o[f])) || null;
+  return o;
+}
+function applySizes() {
+  const z = LOOK.sizes || (LOOK.sizes = normSizes(null)); const st = document.documentElement.style; const px = (v) => Math.round(v) + 'px';
+  const set = { fs: z.text, 'fs-s': z.text * 0.88, 'fs-xs': z.text * 0.8, 'fs-h': z.text * 1.14, 'fs-t': (z.text * z.heading) / 100, 'nav-fs': z.menuText, 'nav-ic': z.menuIcon, brand: z.brand, ic: z.icon,
+    ch: z.control, rh: z.row, 'ch-s': Math.max(22, z.control - 6), chip: Math.max(18, z.text * 0.88 * 1.75), tb: Math.max(32, z.text * 2.3), sb: Math.max(36, z.text * 2.6) };
+  for (const [k, v] of Object.entries(set)) st.setProperty('--' + k, px(v));
+  const f = z.scale / 100; st.setProperty('--zoom', String(f));
+  if (window.csNative && window.csNative.setZoom) window.csNative.setZoom(f); else st.zoom = f === 1 ? '' : String(f);
+  const bg = LOOK.current.background;
+  if (window.csNative && window.csNative.setTitleBar) window.csNative.setTitleBar({ color: bg.ground, symbolColor: bg.sec, height: Math.round(Math.max(32, z.text * 2.3) * f) - 1 });
+}
+function setSizes(next, rerender = true) { LOOK.sizes = normSizes(next); applySizes(); persistLook(); if (rerender && curRoute() === 'look') views.look.form(); }
+function stepScale(dir) { const z = { ...(LOOK.sizes || normSizes(null)) }; z.scale = dir === 0 ? 100 : Math.max(70, Math.min(200, Math.round((z.scale + dir * 10) / 10) * 10)); setSizes(z); toast(`Overall size ${z.scale}%`, 'info'); }
 let CUSTOM_FONTS = []; const LOADED_FONTS = new Set();
 
 // Collection Sorter's older themes, kept as ready-made themes (DESIGN.md: an app may keep what the owner asks for).
@@ -37,7 +67,7 @@ function oldTheme([id, name, v]) {
 }
 const BUILTIN = () => [{ id: 'default', name: 'Default', theme: T.normalize(T.DEFAULT_THEME), builtIn: true }, ...OLD_THEMES.map(oldTheme)];
 const savedTheme = (id) => BUILTIN().find((s) => s.id === id) || LOOK.saved.find((s) => s.id === id) || null;
-const themeKey = (t) => JSON.stringify({ ...T.normalize(t), name: '' });
+const themeKey = (t) => JSON.stringify({ ...T.normalize(t), name: '', font: { ...T.normalize(t).font, size: 0 }, density: null });
 
 function patternCss(kind, a) {
   const c = `rgba(255,255,255,${a})`; const enc = (s) => `url("data:image/svg+xml,${encodeURIComponent(s)}")`;
@@ -52,17 +82,19 @@ function applyTheme() {
   for (const [k, val] of Object.entries(v)) { if (k === 'scheme') st.colorScheme = val; else st.setProperty('--' + k, val); }
   const ex = LOOK.current.extras || {}; const p = patternCss(ex.pattern, (ex.patternStrength || 8) / 100);
   st.setProperty('--bgpat', p ? p[0] : 'none'); st.setProperty('--patsize', p ? p[1] : 'auto'); st.setProperty('--glowbg', ex.glowBg || 'none');
-  const bg = LOOK.current.background;
-  if (window.csNative && window.csNative.setTitleBar) window.csNative.setTitleBar({ color: bg.ground, symbolColor: bg.sec });
+  applySizes();
 }
 let lookTimer = null;
-function persistLook() { clearTimeout(lookTimer); lookTimer = setTimeout(() => api('/appearance', { version: 1, current: LOOK.current, activeId: LOOK.activeId, saved: LOOK.saved }).catch(() => {}), 300); }
+function persistLook() { clearTimeout(lookTimer); lookTimer = setTimeout(() => api('/appearance', { version: 2, current: LOOK.current, activeId: LOOK.activeId, saved: LOOK.saved, sizes: LOOK.sizes }).catch(() => {}), 300); }
 async function loadLook() {
   let d = null; try { d = await api('/appearance'); } catch { /* defaults */ }
   if (d && d.current) {
     LOOK.current = T.normalize(d.current); LOOK.activeId = d.activeId || null;
     LOOK.saved = Array.isArray(d.saved) ? d.saved.filter((s) => s && s.id && s.theme).map((s) => ({ id: s.id, name: String(s.name || 'Theme'), theme: T.normalize(s.theme) })) : [];
+    LOOK.sizes = normSizes(d.sizes);   // older versions had no sizes: start on Large
+    if (!d.sizes) persistLook();
   } else {
+    LOOK.sizes = normSizes(null);
     // first start of this version: the owner's own saved looks from the old Appearance dialog become saved themes
     for (const c of PREFS.custom || []) {
       const ap = c.ap || {}; const base = OLD_THEMES.find((x) => x[0] === (ap.theme === 'midnight' ? 'classic' : ap.theme)) || OLD_THEMES[0]; const o = oldTheme(base).theme;
@@ -81,6 +113,7 @@ async function loadCustomFonts() {
     try { const face = new FontFace(f.family, `url(/api/fontfile?id=${encodeURIComponent(f.id)}&name=${encodeURIComponent(file.name)}&t=${encodeURIComponent(TOKEN)})`, { weight: String(file.weight), style: file.style || 'normal' }); await face.load(); document.fonts.add(face); LOADED_FONTS.add(key); } catch (e) { logLine(`Could not load the font ${file.name}: ${e.message}`, 'w'); }
   }
 }
+const withSizes = (t) => T.normalize({ ...t, font: { ...t.font, size: Math.min(22, LOOK.sizes.text) }, density: { control: LOOK.sizes.control, row: LOOK.sizes.row } });
 function setLook(next, { rerender = true } = {}) {
   LOOK.current = T.normalize({ ...next, name: LOOK.current.name }); applyTheme(); persistLook();
   if (curRoute() === 'look') { if (rerender) views.look.render($('#view')); else views.look.themes(); }
@@ -110,7 +143,7 @@ views.look = {
         <div class="acts">${edited && !s.builtIn ? '<button data-a="update">Update</button>' : ''}${s.builtIn ? '' : '<button data-a="rename">Rename</button>'}<button data-a="dup">Duplicate</button><button data-a="export">Export</button>${s.builtIn ? '' : '<button class="dg" data-a="del">Delete</button>'}</div></div>`; }).join('');
   },
   form() {
-    const t = LOOK.current; const d = T.describe(t); const ex = t.extras;
+    const t = LOOK.current; const d = T.describe(t); const ex = t.extras; const z = LOOK.sizes || normSizes(null);
     const fonts = { bundled: (window.BUNDLED_FONTS || []).map((f) => ({ family: f.family, kind: 'bundled', ok: true })), extra: ['Nunito', 'Lora', 'Playfair Display', 'Instrument Serif', 'IBM Plex Mono'].map((f) => ({ family: f, kind: 'extra', ok: true })), system: T.SYSTEM_FONTS.map((f) => ({ family: f, kind: 'system', ok: systemFontInstalled(f) })), custom: CUSTOM_FONTS.map((f) => ({ family: f.family, kind: 'custom', ok: true, id: f.id })) };
     const fchip = (f, key = 'font', cur = t.font.family) => `<button class="achip font ${cur === f.family ? 'on' : ''} ${f.ok ? '' : 'off'}" data-${key}="${esc(f.family)}" style="font-family:${esc(T.fontStack(f.family))}" ${f.ok ? '' : 'disabled title="Not installed on this computer"'}>${esc(f.family === 'Segoe UI Variable Text' ? 'Segoe UI Variable' : f.family)}${f.kind === 'system' ? ` <span class="note">${f.ok ? 'installed' : 'not installed'}</span>` : ''}${f.kind === 'custom' && key === 'font' ? `<span class="x" data-rmfont="${esc(f.id)}" title="Remove this font">${icon('x')}</span>` : ''}</button>`;
     const crow = (g, k, l, v) => `<div class="crow"><input type="color" value="${v}" data-cg="${g}" data-ck="${k}" aria-label="${esc(l)}"><span>${esc(l)}</span><input class="hex" value="${v}" data-hg="${g}" data-hk="${k}" spellcheck="false" aria-label="${esc(l)} hex"></div>`;
@@ -122,6 +155,10 @@ views.look = {
         <div class="preview"><div class="pbox"><div class="trow"><button class="pri">Scan &amp; tag</button><button>Add folder…</button><button class="ghost">Cancel</button></div><div class="trow"><select style="width:140px"><option>NSFW</option></select><label class="chk"><input type="checkbox" checked> Find HQ only</label></div></div>
           <div class="pbox"><div class="trow" style="justify-content:space-between"><b>Reading files 1,240 of 2,130</b><span>58%</span></div><div class="bar"><i style="width:58%"></i></div><span class="small muted">3:12 elapsed · about 3:14 left</span></div>
           <div class="pbox"><div class="trow"><span class="chip ok">Moved</span><span class="chip warn">Check</span><span class="chip bad">Failed</span><span class="chip nsfw">NSFW</span><span class="chip very">Very</span></div><div class="trow"><span class="tg">blue sky <i>91</i></span><span class="faint small">Faint text · contrast ${pc.toFixed(1)}:1</span></div></div></div></div>
+      <div class="asec" id="a-sizes"><div class="sh"><h3>Sizes</h3><span>${z.preset ? esc(SIZE_PRESETS[z.preset].name) : 'Your own sizes'} · ${z.scale}% overall · the same in every theme</span></div>
+        <div class="trow"><span class="inl lw">Preset</span>${seg('a-zpre', Object.entries(SIZE_PRESETS).map(([k, p]) => [k, p.name]), z.preset || '')}<span class="faint small">Sets everything below in one go; then change any of them</span></div>
+        <div class="trow"><span class="inl lw">Overall size</span><span class="slider wide"><input type="range" min="70" max="200" step="5" value="${z.scale}" data-z="scale"><span class="v">${z.scale}%</span></span><button class="sm" data-zstep="-1">−</button><button class="sm" data-zstep="1">+</button><button class="sm ghost" data-zstep="0">Back to 100%</button><span class="faint small">Makes everything bigger or smaller together, like zooming. Ctrl + plus, Ctrl + minus and Ctrl + 0 do the same anywhere.</span></div>
+        <div class="zgrid">${SIZE_FIELDS.map(([k, l, lo, hi, u, tip]) => `<div class="zrow" title="${esc(tip)}"><span class="inl">${esc(l)}</span><input type="range" min="${lo}" max="${hi}" value="${z[k]}" data-z="${k}"><span class="v">${z[k]} ${u}</span></div>`).join('')}</div></div>
       <div class="asec"><div class="sh"><h3>Background</h3><span>${d.background ? esc(T.BACKGROUNDS[d.background].name) : 'Custom'} · pick a preset, then change any colour</span></div>
         <div class="achips">${Object.entries(T.BACKGROUNDS).map(([k, b]) => `<button class="achip ${d.background === k ? 'on' : ''}" data-bg="${k}"><span class="sw" style="background:linear-gradient(135deg, ${b.ground} 0 45%, ${b.raised} 45% 75%, ${b.text} 75%)"></span>${esc(b.name)}</button>`).join('')}</div>
         <div class="colors">${T.BG_LABELS.map(([k, l]) => crow('background', k, l, t.background[k])).join('')}</div>
@@ -138,14 +175,11 @@ views.look = {
         <div class="subhead">From the older Collection Sorter themes</div><div class="achips">${fonts.extra.map((f) => fchip(f)).join('')}</div>
         <div class="subhead">On this computer</div><div class="achips">${fonts.system.map((f) => fchip(f)).join('')}</div>
         <div class="subhead">Added by you</div><div class="achips">${fonts.custom.map((f) => fchip(f)).join('')}<button id="a-addfont">${icon('plus')}Add font…</button></div>
-        <div class="trow"><span class="inl">Text size</span>${seg('a-size', T.TEXT_SIZES.map((s) => [s, s + ' px']), t.font.size)}</div></div>
-      <div class="asec"><div class="sh"><h3>Shape, spacing and buttons</h3><span>${d.corners ? esc(T.CORNERS[d.corners].name) : 'Custom'} corners · ${d.density ? esc(T.DENSITY[d.density].name) : 'custom'} density · ${t.buttons.style === 'glow' ? 'Glow' : 'Flat'} buttons</span></div>
+        <div class="faint small">Text size is under Sizes above.</div></div>
+      <div class="asec"><div class="sh"><h3>Corners and buttons</h3><span>${d.corners ? esc(T.CORNERS[d.corners].name) : 'Custom'} corners · ${t.buttons.style === 'glow' ? 'Glow' : 'Flat'} buttons</span></div>
         <div class="trow"><span class="inl" style="width:88px">Corners</span>${seg('a-corners', Object.entries(T.CORNERS).map(([k, c]) => [k, c.name]), d.corners)}
           <span class="slider"><span class="inl">Controls</span><input type="range" min="0" max="16" value="${t.corners.control}" data-num="corners.control"><span class="v">${t.corners.control} px</span></span>
           <span class="slider"><span class="inl">Panels</span><input type="range" min="0" max="24" value="${t.corners.panel}" data-num="corners.panel"><span class="v">${t.corners.panel} px</span></span></div>
-        <div class="trow"><span class="inl" style="width:88px">Density</span>${seg('a-density', Object.entries(T.DENSITY).map(([k, c]) => [k, c.name]), d.density)}
-          <span class="slider"><span class="inl">Controls</span><input type="range" min="24" max="44" value="${t.density.control}" data-num="density.control"><span class="v">${t.density.control} px</span></span>
-          <span class="slider"><span class="inl">Rows</span><input type="range" min="20" max="40" value="${t.density.row}" data-num="density.row"><span class="v">${t.density.row} px</span></span></div>
         <div class="trow"><span class="inl" style="width:88px">Buttons</span>${seg('a-btn', [['flat', 'Flat'], ['glow', 'Glow']], t.buttons.style)}<span class="faint small">Glow adds a soft accent glow under the main buttons</span></div></div>
       <div class="asec"><div class="sh"><h3>Outline and highlight</h3><span>The line around what is selected or focused, and the tint behind it</span></div>
         <div class="trow"><span class="inl" style="width:88px">Outline</span>${seg('a-olc', [['', 'Accent'], ['own', 'Own colour']], t.outline.colour ? 'own' : '')}${t.outline.colour ? `<input type="color" value="${t.outline.colour}" data-olc="1">` : ''}
@@ -163,21 +197,21 @@ views.look = {
     $('#a-themes').onclick = async (e) => {
       const card = e.target.closest('.tcard'); if (!card) return; const s = savedTheme(card.dataset.id); if (!s) return; const act = e.target.closest('[data-a]') && e.target.closest('[data-a]').dataset.a;
       if (!act) { LOOK.activeId = s.id; LOOK.current = T.normalize(s.theme); applyTheme(); persistLook(); return self.render(el); }
-      if (act === 'update') { s.theme = T.normalize({ ...LOOK.current, name: s.name }); persistLook(); self.themes(); toast(`Saved the changes to ${s.name}`); }
+      if (act === 'update') { s.theme = withSizes({ ...LOOK.current, name: s.name }); persistLook(); self.themes(); toast(`Saved the changes to ${s.name}`); }
       if (act === 'rename') { const v = await askText('Rename theme', '', s.name, 'Rename'); if (v) { s.name = v.slice(0, 60); s.theme.name = s.name; persistLook(); } self.render(el); }
       if (act === 'dup') { const c = { id: 't' + Date.now().toString(36), name: `${s.name} copy`, theme: T.normalize({ ...s.theme, name: `${s.name} copy` }) }; LOOK.saved.push(c); persistLook(); self.themes(); }
       if (act === 'export') self.export({ ...s.theme, name: s.name });
       if (act === 'del') { if (await confirmBox(`Delete ${s.name}?`, 'The theme is removed from this app. What you see now stays until you pick another theme.', 'Delete', true)) { LOOK.saved = LOOK.saved.filter((x) => x.id !== s.id); if (LOOK.activeId === s.id) LOOK.activeId = null; persistLook(); } self.render(el); }
     };
-    $('#a-save').onclick = async () => { const v = await askText('Save as theme', 'Saves everything you see now: colours, gradient, font, corners, density and the extras.', `My theme ${LOOK.saved.length + 1}`, 'Save'); if (!v) return self.render(el); const s = { id: 't' + Date.now().toString(36), name: v.slice(0, 60), theme: T.normalize({ ...LOOK.current, name: v }) }; LOOK.saved.push(s); LOOK.activeId = s.id; persistLook(); self.render(el); toast(`Saved ${s.name}`); };
-    $('#a-export').onclick = () => { const s = LOOK.activeId ? savedTheme(LOOK.activeId) : null; self.export({ ...LOOK.current, name: s ? s.name : 'Custom theme' }); };
+    $('#a-save').onclick = async () => { const v = await askText('Save as theme', 'Saves everything you see now: colours, gradient, font, corners, density and the extras.', `My theme ${LOOK.saved.length + 1}`, 'Save'); if (!v) return self.render(el); const s = { id: 't' + Date.now().toString(36), name: v.slice(0, 60), theme: withSizes({ ...LOOK.current, name: v }) }; LOOK.saved.push(s); LOOK.activeId = s.id; persistLook(); self.render(el); toast(`Saved ${s.name}`); };
+    $('#a-export').onclick = () => { const s = LOOK.activeId ? savedTheme(LOOK.activeId) : null; self.export(withSizes({ ...LOOK.current, name: s ? s.name : 'Custom theme' })); };
     $('#a-import').onclick = async () => {
       try { const r = await api('/theme/import', {}); if (r.unsupported) return toast('Importing works in the app window.', true); if (!r.themes.length) return;
         for (const t of r.themes) { const n = T.normalize(t); let name = n.name; while (LOOK.saved.some((s) => s.name === name)) name += ' (imported)'; LOOK.saved.push({ id: 't' + Math.random().toString(36).slice(2, 9), name, theme: { ...n, name } }); }
         persistLook(); self.themes(); toast(`Imported ${r.themes.length} theme${r.themes.length === 1 ? '' : 's'}. Click one to use it.`);
       } catch (e) { toast(e.message, true); }
     };
-    $('#a-reset').onclick = async () => { if (!(await confirmBox('Go back to the default look?', 'Obsidian, Blue → Cyan, Inter, standard corners, compact, flat buttons, no extras. Your saved themes stay.', 'Use default'))) return self.render(el); LOOK.activeId = 'default'; LOOK.current = T.normalize(T.DEFAULT_THEME); applyTheme(); persistLook(); self.render(el); };
+    $('#a-reset').onclick = async () => { if (!(await confirmBox('Go back to the default look?', 'Obsidian, Blue → Cyan, Inter, standard corners, flat buttons, no extras. Your sizes and saved themes stay.', 'Use default'))) return self.render(el); LOOK.activeId = 'default'; LOOK.current = T.normalize(T.DEFAULT_THEME); applyTheme(); persistLook(); self.render(el); };
     const F = $('#a-form');
     F.onclick = async (e) => {
       const t = clone(LOOK.current); const q = (s) => e.target.closest(s); let b;
@@ -186,10 +220,10 @@ views.look = {
       if ((b = q('[data-acc]'))) { t.accent.stops = [...T.ACCENTS[b.dataset.acc].stops]; return setLook(t); }
       if ((b = q('[data-font]')) && !b.disabled) { t.font.family = b.dataset.font; return setLook(t); }
       if ((b = q('[data-hfont]'))) { t.extras.headingFont = b.dataset.hfont; return setLook(t); }
-      if ((b = q('#a-size [data-v]'))) { t.font.size = +b.dataset.v; return setLook(t); }
+      if ((b = q('#a-zpre [data-v]'))) { const pz = SIZE_PRESETS[b.dataset.v]; return setSizes({ ...LOOK.sizes, ...pz }); }
+      if ((b = q('[data-zstep]'))) return stepScale(+b.dataset.zstep);
       if ((b = q('#a-on [data-v]'))) { t.accent.onAccent = b.dataset.v; return setLook(t); }
       if ((b = q('#a-corners [data-v]'))) { const c = T.CORNERS[b.dataset.v]; t.corners = { control: c.control, panel: c.panel }; return setLook(t); }
-      if ((b = q('#a-density [data-v]'))) { const c = T.DENSITY[b.dataset.v]; t.density = { control: c.control, row: c.row }; return setLook(t); }
       if ((b = q('#a-btn [data-v]'))) { t.buttons.style = b.dataset.v; return setLook(t); }
       if ((b = q('#a-olc [data-v]'))) { t.outline.colour = b.dataset.v ? (t.outline.colour || '#ffffff') : ''; return setLook(t); }
       if ((b = q('#a-hlc [data-v]'))) { t.highlight.colour = b.dataset.v ? (t.highlight.colour || '#ffffff') : ''; return setLook(t); }
@@ -205,6 +239,7 @@ views.look = {
       else if (x.dataset.hg) { if (!isHex(x.value)) { x.classList.add('bad'); return; } x.classList.remove('bad'); t[x.dataset.hg][x.dataset.hk] = x.value.trim(); }
       else if (x.dataset.stop !== undefined) { t.accent.stops[+x.dataset.stop] = x.value; const h = $(`[data-stophex="${x.dataset.stop}"]`); if (h) h.value = x.value; }
       else if (x.dataset.stophex !== undefined) { if (!isHex(x.value)) { x.classList.add('bad'); return; } x.classList.remove('bad'); t.accent.stops[+x.dataset.stophex] = x.value.trim(); }
+      else if (x.dataset.z) { const z = { ...LOOK.sizes, [x.dataset.z]: +x.value }; const f = SIZE_FIELDS.find((r) => r[0] === x.dataset.z); x.nextElementSibling.textContent = x.value + (f ? ' ' + f[4] : '%'); LOOK.sizes = normSizes(z); applySizes(); persistLook(); return; }
       else if (x.id === 'a-angle') { t.accent.angle = +x.value; $('#a-angle-v').textContent = x.value + '°'; }
       else if (x.dataset.olc) t.outline.colour = x.value;
       else if (x.dataset.hlc) t.highlight.colour = x.value;
@@ -212,7 +247,7 @@ views.look = {
       else return;
       setLook(t, { rerender: false }); const gp = $('.gprev'); if (gp) gp.style.background = T.gradient(LOOK.current.accent.stops, LOOK.current.accent.angle);
     };
-    F.onchange = (e) => { if (e.target.matches('input[type=color], input[type=range], .hex')) self.form(); };
+    F.onchange = (e) => { if (e.target.matches('input[type=color], input[type=range], .hex')) self.form(); };   // a size slider re-draws the form when let go
   },
   async export(t) { try { const r = await api('/theme/export', { theme: T.normalize(t) }); if (r.unsupported) toast('Exporting works in the app window.', true); else if (r.path) toast(`Theme saved to ${r.path}`); } catch (e) { toast(e.message, true); } },
   async addFont(el) {
