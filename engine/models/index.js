@@ -55,6 +55,8 @@ async function loadModels(settings, dir, force) {
       } catch (e) {
         for (const x of made) try { x.release(); } catch { /* gone */ }
         lastErr = e; log(`models: ${key} ${opts.device}/batch ${opts.batch} failed: ${e.stack || e.message}`);
+        // a problem with the file itself fails the same way on every card: say it once and move on
+        if (/Load model from .* failed|Protobuf parsing failed|No such file/i.test(String(e.message))) { notes.push(`${TAGGERS[key].short}'s model file could not be opened (${short(e)}). If it keeps happening, delete the "${TAGGERS[key].dir || key}" folder in the Models folder and download it again.`); break; }
         notes.push(`${TAGGERS[key].label} on ${opts.device === 'cpu' ? 'the processor' : opts.gpuName ? 'the ' + opts.gpuName : 'the graphics card'} with ${opts.batch} at a time failed: ${short(e)}.`);
       }
     }

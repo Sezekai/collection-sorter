@@ -33,6 +33,8 @@ async function downloadOne(f, dir, onProgress, signal) {
   const part = dest + '.part';
   const url = `${HF()}/${f.repo}/resolve/main/${f.file}`;
   for (let attempt = 1; attempt <= 4; attempt++) {
+    let ws = null;
+    const closeWs = () => new Promise((r) => { if (!ws || ws.closed) return r(); ws.once('close', r); ws.destroy(); });
     try {
       let have = 0;
       try { have = fs.statSync(part).size; } catch { /* fresh */ }
@@ -40,7 +42,7 @@ async function downloadOne(f, dir, onProgress, signal) {
       if (res.status === 416) { fs.renameSync(part, dest); return; }
       if (!res.ok && res.status !== 206) throw new Error(`HTTP ${res.status} for ${url}`);
       const total = (res.status === 206 ? have : 0) + Number(res.headers.get('content-length') || 0);
-      const ws = fs.createWriteStream(part, { flags: res.status === 206 ? 'a' : 'w' });
+      ws = fs.createWriteStream(part, { flags: res.status === 206 ? 'a' : 'w' });
       let got = res.status === 206 ? have : 0;
       const reader = res.body.getReader();
       while (true) {
@@ -50,11 +52,12 @@ async function downloadOne(f, dir, onProgress, signal) {
         got += value.length;
         if (onProgress) onProgress({ file: f.label, got, total });
       }
-      await new Promise((r) => ws.end(r));
+      await new Promise((r, j) => { ws.once('close', r); ws.once('error', j); ws.end(); });   // closed, not just flushed, before it is renamed
       if (total && got < total) throw new Error('download ended early');
       fs.renameSync(part, dest);
       return;
     } catch (e) {
+      await closeWs();
       if (signal && signal.aborted) throw e;
       if (attempt === 4) throw new Error(`Could not download ${f.label}: ${e.message}`);
       await new Promise((r) => setTimeout(r, 1500 * attempt));

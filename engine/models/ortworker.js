@@ -12,8 +12,14 @@ async function create(file, { device = 'auto', deviceId = 0 } = {}) {
     try {
       const opts = { executionProviders: [name === 'dml' || name === 'cuda' ? { name, deviceId } : name], graphOptimizationLevel: 'all' };
       if (name === 'dml') { opts.enableMemPattern = false; opts.executionMode = 'sequential'; }
-      return { session: await ort.InferenceSession.create(file, opts), provider: name };
-    } catch (e) { lastErr = e; }
+      try { return { session: await ort.InferenceSession.create(file, opts), provider: name }; }
+      catch (e) {
+        // "system error number 13" = the file is open elsewhere for writing (an unfinished download, antivirus): read it ourselves
+        if (!/system error number 13|Permission denied/i.test(String(e && e.message))) throw e;
+        const bytes = new Uint8Array(require('fs').readFileSync(file));
+        return { session: await ort.InferenceSession.create(bytes, opts), provider: name };
+      }
+    } catch (e) { lastErr = e; if (/system error number|No such file|Protobuf parsing failed|Load model from .* failed/i.test(String(e && e.message)) && !/provider|DML|dml|CUDA/i.test(String(e.message))) break; }
   }
   throw lastErr || new Error('could not create ONNX session');
 }
