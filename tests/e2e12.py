@@ -29,7 +29,7 @@ try:
         check('art and real lists differ', na>0 and nr>0 and na+nr>=10, (na,nr))
         check('real list has only real', all(i['realness']=='real' for i in api('/review?scope=new&realm=real&limit=100')['items']))
         t=pg.locator('#grid .tile').first; i0=int(t.get_attribute('data-id')); t.click()
-        check('button says Move to Art', 'Move to Art' in pg.inner_text('#b_real'))
+        check('button says To Art', 'To Art' in pg.inner_text('#b_real'))
         pg.keyboard.press('p'); pg.wait_for_timeout(1500)
         it=api('/review?scope=any&ids=%d'%i0)['items'][0]
         check('P moved it to art', it['realness']=='art' and it['realBy']=='you', it['realness'])

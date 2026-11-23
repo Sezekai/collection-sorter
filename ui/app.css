@@ -11,7 +11,7 @@
   --ch:28px;--rh:24px;--rc:6px;--rp:10px;--ol:var(--acc);--ow:2px;--hl:var(--acc);--glow:none;--panel-a:1;
   --bgpat:none;--patsize:auto;--glowbg:none;
   /* category colours, for the NSFW / Very labels (ratings, not states) */
-  --nsfw:#ff6fb1;--very:#f0616d;
+  --gen:#3fbf7f;--nsfw:#f29a38;--very:#ec4a55;
   /* aliases for the older names */
   --bg:var(--ground);--panel2:var(--raised);--muted:var(--sec);--accent:var(--acc);--btn:var(--acc);--btntx:var(--on-acc);--bad:var(--danger);--rad:var(--rp);--fg:var(--text);--mut:var(--sec);
   --pfill:color-mix(in srgb,var(--panel) calc(var(--panel-a)*100%),transparent);
@@ -237,7 +237,7 @@ body.nosb .sidebar{display:none}
 .tile .vprev{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background-repeat:no-repeat;pointer-events:none;z-index:2;background-color:#000}
 .tile .badges{position:absolute;top:5px;left:5px;right:30px;display:flex;gap:3px;flex-wrap:wrap;z-index:3;pointer-events:none}
 .tile .badges .chip{background:#000b;color:#fff;border-color:#fff3;height:calc(var(--fs-xs) + 8px);font-size:var(--fs-xs)}
-.tile .badges .chip.very{background:#b5384a;border-color:#b5384a}.tile .badges .chip.nsfw{background:#8b2f6a;border-color:#8b2f6a}.tile .badges .chip.fhq{background:#8a5a12;border-color:#8a5a12}
+.tile .badges .chip.very{background:#c8323d;border-color:#c8323d}.tile .badges .chip.nsfw{background:#c26c12;border-color:#c26c12}.tile .badges .chip.fhq{background:#8a5a12;border-color:#8a5a12}
 .tile .sc{position:absolute;bottom:5px;right:5px;background:#000b;border-radius:4px;padding:0 5px;font-size:var(--fs-xs);font-weight:600;color:#fff;z-index:3}
 .tile .chk{position:absolute;top:5px;right:5px;width:calc(var(--fs) + 3px);height:calc(var(--fs) + 3px);border-radius:4px;border:1.5px solid rgba(255,255,255,.85);background:rgba(0,0,0,.35);color:transparent;font-size:var(--fs-xs);display:flex;align-items:center;justify-content:center;z-index:3;opacity:0}
 .tile:hover .chk{opacity:1}
@@ -274,8 +274,20 @@ body.nosb .sidebar{display:none}
 .grid.no-rating .badges .chip.nsfw,.grid.no-rating .badges .chip.very{display:none}
 .grid.no-flags .badges .chip:not(.nsfw):not(.very){display:none}
 .marquee{position:fixed;z-index:70;border:1px solid var(--ol);background:color-mix(in srgb,var(--hl) 20%,transparent);pointer-events:none}
-.bulk{padding:6px 8px;border-top:1px solid var(--line);background:color-mix(in srgb,var(--acc) 6%,var(--panel));display:flex;gap:8px;flex-wrap:wrap;align-items:center;flex:none}
-.bulk .sp{width:4px}.bulk select{width:auto}.bulk input[type=text]{width:220px}.selcount{min-width:92px;font-weight:600}
+.bulk{padding:6px 8px;border-top:1px solid var(--line);background:color-mix(in srgb,var(--acc) 6%,var(--panel));display:flex;gap:6px 14px;flex-wrap:wrap;align-items:center;flex:none}
+.bulk .bgrp{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.bulk select{width:auto}.bulk input.bfold{width:calc(var(--fs) * 15)}.selcount{min-width:calc(var(--fs) * 6.5);font-weight:600}
+button kbd,.seg button kbd{height:auto;min-width:0;padding:0 4px;margin-left:2px;font-size:var(--fs-xs);line-height:1.5;background:color-mix(in srgb,currentColor 14%,transparent);border:0;color:inherit;opacity:.8}
+/* General / NSFW / Very: green, orange, red */
+.rateseg button.r-general.on{background:var(--gen);color:#06170e}.rateseg button.r-nsfw.on{background:var(--nsfw);color:#1d1003}.rateseg button.r-very.on{background:var(--very);color:#fff}
+.rateseg button.r-general:not(.on){color:var(--gen)}.rateseg button.r-nsfw:not(.on){color:var(--nsfw)}.rateseg button.r-very:not(.on){color:var(--very)}
+.rateseg button:disabled{opacity:.45}
+/* right-click menu */
+.popmenu.ctx{width:auto;min-width:calc(var(--fs) * 17);max-width:calc(var(--fs) * 28);padding:5px;display:flex;flex-direction:column;gap:1px;max-height:calc(100vh - 12px);overflow:auto;z-index:120}
+.popmenu.ctx .mi{display:flex;align-items:center;gap:9px;width:100%;height:var(--rh);border:0;background:transparent;color:var(--text);justify-content:flex-start;padding:0 9px;font-weight:500;text-align:left}
+.popmenu.ctx .mi:hover:not(:disabled){background:var(--raised2)}.popmenu.ctx .mi>span:nth-child(2){flex:1}.popmenu.ctx .mi.danger{color:var(--danger)}
+.popmenu.ctx .mi .ic{width:var(--ic);height:var(--ic);flex:none}.popmenu.ctx .mi kbd{opacity:.7}
+.popmenu.ctx .sep{height:1px;background:var(--line);margin:4px 2px}.popmenu.ctx .mh{padding:4px 9px;color:var(--faint);font-size:var(--fs-s);font-weight:600}
 .zoomable{cursor:zoom-in}
 
 /* ===== dialogs ===== */
@@ -314,6 +326,15 @@ body.fullscreen .viewer{top:0}
 .viewer .vhint kbd{height:calc(var(--fs-xs) + 6px);min-width:calc(var(--fs-xs) + 6px);font-size:var(--fs-xs);padding:0 3px}
 .viewer .vstat{font-size:var(--fs);color:var(--sec);min-height:1.3em}
 .viewer .vrow{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.viewer .vbtns{display:grid;grid-template-columns:repeat(auto-fill,minmax(calc(var(--fs) * 8.5),1fr));gap:6px}.viewer .vbtns button{justify-content:center;padding:0 6px}
+.viewer .rateseg{display:flex}.viewer .rateseg button{flex:1}
+.viewer .ttabs{display:flex;gap:4px;flex-wrap:wrap}.viewer .ttabs .tab{height:auto;min-height:calc(var(--ch) - 8px);line-height:1.3;padding:3px 9px;border:1px solid var(--line)}.viewer .ttabs .tab.on{border-color:var(--acc)}
+/* video controls over the bottom of the video: see-through, gone (with the pointer) while the mouse rests on the video */
+.viewer .vov{position:absolute;left:0;right:0;bottom:0;z-index:5;display:flex;align-items:center;gap:10px;padding:22px 16px 12px;background:linear-gradient(to top,#000b,#0000);color:#fff;transition:opacity .25s;cursor:default}
+.viewer .vov input[type=range]{flex:1;min-width:60px;accent-color:#fff}.viewer .vov input.vvol{flex:0 0 calc(var(--fs) * 7);max-width:140px}
+.viewer .vov .vb{width:calc(var(--ic) + 18px);height:calc(var(--ic) + 14px);padding:0;justify-content:center;background:#ffffff1f;border:0;color:#fff;border-radius:var(--rc)}.viewer .vov .vb:hover{background:#ffffff38}
+.viewer .vov .vt{font-variant-numeric:tabular-nums;font-size:var(--fs-s);text-shadow:0 1px 2px #000}
+.viewer .stage.vidle .vov{opacity:0;pointer-events:none}.viewer .stage.vidle{cursor:none}
 .viewer .vrow .grow{flex:1}
 .viewer .vcontrols{display:flex;flex-direction:column;gap:6px;padding:8px;border:1px solid var(--line);border-radius:var(--rc);background:var(--field)}
 .viewer .vcontrols input[type=range]{width:100%}
@@ -433,3 +454,14 @@ body.fullscreen .viewer{top:0}
 .swstat{display:grid;grid-template-columns:repeat(auto-fill,minmax(calc(var(--fs) * 13),1fr));gap:6px}
 .swstat div{background:var(--field);border:1px solid var(--line);border-radius:var(--rc);padding:8px 10px}.swstat b{display:block;font-size:var(--fs-h)}
 .swopt{display:flex;gap:8px;align-items:flex-start;padding:6px 0;color:var(--text);font-weight:400;font-size:var(--fs);margin:0}.swopt input{margin-top:3px}
+
+/* ===== Setup → AI models → Taggers ===== */
+.tscroll{overflow-x:auto}
+.tgtable{width:100%;border-collapse:collapse}
+.tgtable th{text-align:left;font-size:var(--fs-s);color:var(--faint);font-weight:600;padding:4px 8px;border-bottom:1px solid var(--line)}
+.tgtable td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+.tgtable tr.cur td{background:color-mix(in srgb,var(--acc) 7%,transparent)}
+.tgtable .num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.tgtable .acts{white-space:nowrap;text-align:right}.tgtable .acts button+button{margin-left:4px}
+/* Examples: a folder with no destination */
+.nodest{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:4px}

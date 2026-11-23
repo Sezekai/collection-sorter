@@ -88,8 +88,11 @@ create index if not exists journal_file on journal(file_id);
 create table if not exists set_members(set_id integer, file_id integer, primary key(set_id,file_id));
 create table if not exists kv(k text primary key, v text);
 create table if not exists labels(fp text primary key, real integer, ts real);   -- your "this is a real photo/video" / "this is art" corrections
-create table if not exists file_tags(file_id integer, tag text, conf real, cat integer, primary key(file_id, tag));
-create index if not exists ft_tag on file_tags(tag, conf);
+-- every tagger's tags, kept apart: src '' = the tags the sorting uses, otherwise the tagger's key (haruka, pixai, camie, eva02-large, joytag…)
+create table if not exists file_tags(file_id integer, src text default '', tag text, conf real, cat integer, primary key(file_id, src, tag));
+-- what each tagger said about each picture / example (json like files.tags), so re-tagging with another tagger loses nothing
+create table if not exists tagsets(file_id integer, tagger text, tags text, rating text, ts real, primary key(file_id, tagger));
+create table if not exists ref_tagsets(ref_id integer, tagger text, tags text, rating text, ts real, primary key(ref_id, tagger));
 `;
 
 function migrate(d) {
@@ -116,6 +119,24 @@ function migrate(d) {
   add('refs', 'jtags', 'text');
   add('files', 'tagger', 'text');                // which tagging model read this picture
   add('refs', 'tagger', 'text');
+  // file_tags got a source column (one set of rows per tagger): rebuild it from the stored tags
+  if (!d.prepare('pragma table_info(file_tags)').all().some((c) => c.name === 'src')) {
+    d.exec(`drop table file_tags; create table file_tags(file_id integer, src text default '', tag text, conf real, cat integer, primary key(file_id, src, tag)); delete from kv where k='file_tags_v1'`);
+  }
+  d.exec('create index if not exists refs_analyzed on refs(analyzed); create index if not exists files_status on files(status, analyzed)');
+  d.exec('create index if not exists ft_src_tag on file_tags(src, tag, conf); create index if not exists ft_file on file_tags(file_id)');
+  // first run with tag sets: what is stored now becomes the set of the tagger that made it
+  if (!d.prepare(`select 1 from kv where k='tagsets_v1'`).get()) {
+    const used = (() => { try { return JSON.parse((d.prepare(`select v from kv where k='taggerUsed'`).get() || {}).v || 'null'); } catch { return null; } })() || 'eva02-large';
+    d.exec('begin');
+    try {
+      d.prepare(`insert or ignore into tagsets(file_id,tagger,tags,rating,ts) select id, coalesce(tagger, ?), tags, json_object('general',rating_g,'sensitive',rating_s,'questionable',rating_q,'explicit',rating_e), 0 from files where tags is not null`).run(used);
+      d.exec(`insert or ignore into tagsets(file_id,tagger,tags,rating,ts) select id, 'joytag', jtags, null, 0 from files where jtags is not null`);
+      d.prepare(`insert or ignore into ref_tagsets(ref_id,tagger,tags,rating,ts) select id, coalesce(tagger, ?), tags, rating, 0 from refs where tags is not null and analyzed=1`).run(used);
+      d.exec(`insert or ignore into ref_tagsets(ref_id,tagger,tags,rating,ts) select id, 'joytag', jtags, null, 0 from refs where jtags is not null and analyzed=1`);
+      d.exec(`insert into kv(k,v) values('tagsets_v1','true')`); d.exec('commit');
+    } catch (e) { d.exec('rollback'); throw e; }
+  }
   // backfill the NSFW / Very label of examples learned before this column existed
   for (const r of d.prepare(`select id,path from refs where label is null`).all()) {
     const p = r.path.replace(/\\/g, '/').toLowerCase();
@@ -137,7 +158,7 @@ function get() { return db || open(); }
 
 function tx(fn) {
   const d = get();
-  d.exec('begin');
+  d.exec('begin immediate');   // take the write lock up front (waits for the training thread's connection instead of failing half-way)
   try { const r = fn(d); d.exec('commit'); return r; } catch (e) { d.exec('rollback'); throw e; }
 }
 function kvGet(k, def = null) {

@@ -40,6 +40,8 @@ const rm = (p) => fs.rmSync(p, { recursive: true, force: true });
   await download(`https://github.com/electron/electron/releases/download/v${ELECTRON}/electron-v${ELECTRON}-win32-x64.zip`, ez);
   if (win) sh('tar', ['-xf', ez, '-C', APPDIR]); else sh('unzip', ['-q', ez, '-d', APPDIR]);
   fs.renameSync(path.join(APPDIR, 'electron.exe'), path.join(APPDIR, 'Collection Sorter.exe'));
+  // the program's own icon (the logo from the side menu) and name in Explorer / the taskbar; rcedit runs on Windows only
+  if (win) { try { const rcedit = require('rcedit'); await rcedit(path.join(APPDIR, 'Collection Sorter.exe'), { icon: path.join(HERE, 'app', 'icons', 'icon.ico'), 'version-string': { FileDescription: 'Collection Sorter', ProductName: 'Collection Sorter', CompanyName: 'Sezekai', OriginalFilename: 'Collection Sorter.exe' }, 'file-version': pkg.version, 'product-version': pkg.version }); console.log('== icon set'); } catch (e) { console.error('!! could not set the .exe icon:', e.message); if (process.env.CI) process.exit(1); } }
   rm(path.join(APPDIR, 'resources', 'default_app.asar'));
   const APP = path.join(APPDIR, 'resources', 'app'); fs.mkdirSync(APP, { recursive: true });
   for (const d of ['app', 'engine', 'ui']) fs.cpSync(path.join(HERE, d), path.join(APP, d), { recursive: true });

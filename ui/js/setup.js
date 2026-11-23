@@ -7,12 +7,25 @@ const RESETS = [
   { what: 'analysis', title: 'Read all files again', text: 'Keeps the file list but throws away what was read from each picture (tags, ratings, fingerprints), so every file is read again on the next scan. Use this after changing the models or if results look wrong.', btn: 'Read again' },
   { what: 'series', title: 'Forget series assignments', text: 'Removes the choices made on the Unmapped series screen.', btn: 'Forget assignments', after: 'redecide' },
   { what: 'rules', title: 'Reset rules and ranking', text: 'Puts every folder’s rules and the whole ranking back to the built-in defaults.', btn: 'Reset rules', after: 'redecide' },
-  { what: 'sauce', title: 'Clear source-lookup answers', text: 'Forgets the answers and queue of SauceNAO lookups.', btn: 'Clear answers' },
   { what: 'thumbs', title: 'Clear the thumbnail cache', text: 'Deletes the small preview pictures. They are rebuilt when needed.', btn: 'Clear thumbnails' },
   { what: 'settings', title: 'Reset all settings to recommended', text: 'Puts every setting back to its recommended value and forgets the folders you added. Your files and learned data stay.', btn: 'Reset settings' },
   { what: 'history', title: 'Clear the move history', text: 'Deletes the journal of moves. Files that were already moved can then no longer be undone from this app.', btn: 'Clear history', danger: true },
   { what: 'everything', title: 'Start completely fresh', text: 'Clears the file list, everything learned, suggestions, sets, duplicates and assignments. Your settings, the downloaded models and the move history are kept.', btn: 'Start fresh', danger: true },
 ];
+// The taggers: which one the sorting uses, which are downloaded, how many pictures / examples each has tagged, and "tag everything again"
+function taggerCard() {
+  const T = S.tagger || {}; const cov = T.coverage || { files: [], refs: [], totals: {} }; const tot = cov.totals || {};
+  const n = (list, k) => (list.find((x) => x.tagger === k) || {}).n || 0;
+  const rows = (T.options || []).map((o) => `<tr class="${o.key === T.model ? 'cur' : ''}"><td><label class="chk" style="color:var(--text)"><input type="radio" name="tgsort" value="${esc(o.key)}" ${o.key === T.model ? 'checked' : ''}> <b>${esc(o.short)}</b></label><div class="small faint">${esc(o.label.replace(/^[^(]*\(/, '(').replace(/\)$/, ')'))}</div></td>
+      <td>${o.ready ? '<span class="chip ok">downloaded</span>' : `<button class="sm" data-dltag="${esc(o.key)}">Download</button>`}</td>
+      <td class="num">${fmtNum(n(cov.files, o.key))} <span class="faint">/ ${fmtNum(tot.files || 0)}</span></td><td class="num">${fmtNum(n(cov.refs, o.key))} <span class="faint">/ ${fmtNum(tot.refs || 0)}</span></td>
+      <td class="acts">${o.ready ? `<button class="sm ghost" data-tagall="${esc(o.key)}" title="Tag every picture waiting for review with ${esc(o.short)}">Tag files</button><button class="sm ghost" data-tagrefs="${esc(o.key)}" title="Tag every learned example with ${esc(o.short)}">Tag examples</button>` : ''}</td></tr>`).join('');
+  const miss = T.missing || {};
+  return `<div class="card"><h2 style="margin:0 0 4px">Taggers</h2>
+    <p class="small muted">Every tagger’s tags are kept separately and never thrown away, so you can try another one and switch back. The one ticked is the one the sorting uses for art and the one new scans use (real-life photos and videos use JoyTag’s tags). The Tags screen and the viewer can show any tagger’s tags.</p>
+    ${(miss.files || miss.refs) ? `<div class="card warnbox" style="margin:6px 0"><b>${fmtNum(miss.files)} pictures and ${fmtNum(miss.refs)} examples</b> have no tags from ${esc(((T.options || []).find((o) => o.key === T.model) || {}).short || T.model)} yet; until they do, the sorting uses their other tags. The next “Scan &amp; tag files” and “Learn from examples” add them, or <button class="sm" id="tagmissing">tag them now</button></div>` : ''}
+    <div class="tscroll"><table class="tgtable"><tr><th>Tagger</th><th></th><th class="num">Pictures tagged</th><th class="num">Examples tagged</th><th></th></tr>${rows}</table></div></div>`;
+}
 views.setup = {
   sec: null,
   async render(el) {
@@ -56,7 +69,10 @@ views.setup = {
         <div class="row" style="margin-top:8px"><button id="addsrc">Add folder…</button><span class="small muted">Any number of folders; subfolders are included. Removing a folder here also forgets its files (the files themselves are never touched).</span></div></div>`],
       ['dest', '2. Destination', s.destinationRoot ? s.destinationRoot.split(/[\\/]/).filter(Boolean).pop() : 'Not set', !s.destinationRoot, `<div class="card"><div class="row"><h2 style="margin:0">Destination (where the sorted folders live)</h2><span class="grow"></span><button class="pri" id="swopen">Change folders…</button></div>
         <div class="pathrow" style="margin-top:8px"><input type="text" id="dest" value="${esc(s.destinationRoot || '')}"><button class="ghost" id="pickdest">Browse…</button></div>
-        <p class="small muted"><b>Moving to another destination, or from test files to real ones?</b> Use <b>Change folders…</b>: it checks the new folder against what the app knows, carries the rules, ranking, examples and what it knows about each folder across, and can forget the old files and their history.</p></div>${destTree}`],
+        <p class="small muted"><b>Moving to another destination, or from test files to real ones?</b> Use <b>Change folders…</b>: it checks the new folder against what the app knows, carries the rules, ranking, examples and what it knows about each folder across, and can forget the old files and their history.</p></div>
+        <div class="card"><h2 style="margin:0 0 6px">Look Up and Find Higher Quality</h2>
+          <label>Look Up folder <span class="faint">(L sends files here: NSFW and Very, Videos, and Real life Images / Videos get their own subfolders)</span></label><div class="pathrow"><input type="text" id="lookroot" value="${esc(s.lookupRoot || '')}" placeholder="For example E:\\Pictures\\IMGs\\Sort\\Look Up"><button class="ghost" id="picklook">Browse…</button></div>
+          <label>Find Higher Quality folder <span class="faint">(approved files marked Find HQ (Q) go here, in the folder they belong in: Anime\\NSFW, …)</span></label><div class="pathrow"><input type="text" id="fhqroot" value="${esc(s.fhqRoot || '')}" placeholder="For example E:\\Pictures\\IMGs\\Sort\\Find Higher Quality"><button class="ghost" id="pickfhq">Browse…</button></div></div>${destTree}`],
       ['examples', '3. Examples to learn from', `${fmtNum(c.refs_done)} learned`, false, `<div class="card"><h2 style="margin-top:0">Examples to learn from (optional, read-only)</h2>
         <p class="small muted">Files already in the right folders teach the app what each folder looks like. They are never moved or changed. The app only learns from a sample of each folder (see “Examples learned per folder” in Settings), so a huge folder is fine — and removing a folder here forgets everything learned from it.</p>
         ${refRows}${keptRows}<div class="row wrap" style="margin-top:8px"><button id="addref" class="ghost">Add examples folder…</button><a class="btnlink" href="#examples">Choose subfolders &amp; where each goes →</a>
@@ -64,7 +80,7 @@ views.setup = {
       ['changes', '4. New and changed', (T.files || T.refs || S.folderChanges) ? 'Something to do' : 'Up to date', !!(S.folderChanges > 0), tagBanner],
       ['models', '5. AI models', S.modelsReady ? 'Ready' : 'Not downloaded', !S.modelsReady, `<div class="card"><h2 style="margin-top:0">AI models</h2>
         ${S.modelsReady ? `<p><span class="chip ok">Ready</span> <span class="small muted">${S.provider ? 'Running on ' + (S.provider === 'dml' ? 'your graphics card (DirectML)' : S.provider) + '.' : 'Loaded when the first scan starts.'}</span> <button class="ghost sm" id="testmodels">Test the AI models</button></p>${S.modelNote ? `<div class="card warnbox"><b>Heads up:</b> ${esc(S.modelNote)}</div>` : ''}<div id="modeltest" class="small"></div>${probCard}`
-          : `<p><span class="chip warn">Not downloaded</span> About 1.7 GB in total (tagger, CLIP and JoyTag), one time, into <code>${esc(di.modelDir || '')}</code>. They run on your graphics card through DirectML, so no extra drivers are needed.</p><button class="pri" id="dlmodels">Download the AI models (about 1.7 GB)</button>`}</div>`],
+          : `<p><span class="chip warn">Not downloaded</span> The chosen tagger, CLIP and JoyTag (about 1.3 GB with Haruka), one time, into <code>${esc(di.modelDir || '')}</code>. They run on your graphics card through DirectML, so no extra drivers are needed.</p><button class="pri" id="dlmodels">Download the AI models</button>`}</div>${taggerCard()}`],
       ['learn', '6. Learn and scan', `${fmtNum(c.analyzed)} of ${fmtNum(c.files)} read`, false, `<div class="card"><h2 style="margin-top:0">Learn and scan</h2>
         <p class="small muted">Two separate steps. <b>Learn from examples</b> reads a sample of your example folders and teaches the app what each folder looks like (it does not touch your new files). <b>Scan &amp; tag files</b> finds the new files, reads and tags every picture and video with the chosen model, finds duplicates and sets, and prepares suggestions. Both can be paused or cancelled and pick up where they stopped.${S.retag ? ` <b>${fmtNum(S.retag)} pictures were tagged by a different model</b> and will be read again with the chosen one on the next scan, so the new tags replace the old.` : ''}</p>
         <div class="row wrap"><button id="learn">${qlab('Learn from examples')}</button><button id="run">${qlab('Scan & tag files')}</button><button class="pri" id="runboth">${qlab('Do both')}</button><button id="redecide">${qlab('Re-run suggestions only')}</button></div>
@@ -83,7 +99,7 @@ views.setup = {
       const o = clone(S.settings);
       o.sources = $$('[data-src]').map((i) => ({ path: i.value.trim(), excludes: $(`[data-ex="${i.dataset.src}"]`).value.split('\n').map((x) => x.trim()).filter(Boolean) })).filter((x) => x.path);
       o.referenceRoots = $$('[data-ref]').map((i) => i.value.trim()).filter(Boolean);
-      o.destinationRoot = $('#dest').value.trim();
+      o.destinationRoot = $('#dest').value.trim(); o.lookupRoot = $('#lookroot').value.trim(); o.fhqRoot = $('#fhqroot').value.trim();
       $$('[data-path]').forEach((i) => { const f = FIELD_BY_PATH[i.dataset.path]; let v = i.value; if (f.type === 'number') { v = parseFloat(v); if (isNaN(v)) v = f.def; v = Math.min(f.max, Math.max(f.min, v)); } else if (f.type === 'select') v = v === 'true' ? true : v === 'false' ? false : v; else v = v.trim(); setPath(o, i.dataset.path, v); });
       return o;
     };
@@ -112,6 +128,8 @@ views.setup = {
     tree($('#desttree'), '', 0).catch(() => { $('#desttree').textContent = 'Could not read the destination folder.'; });
     $('#addref').onclick = () => pick(async (p) => { const o = collect(); o.referenceRoots.push(p); S.settings = await api('/settings', o); toast('Added. Now untick any subfolders you don’t want it to learn from, and check where each one goes.'); location.hash = '#examples'; });
     $('#pickdest').onclick = () => pick((p) => { $('#dest').value = p; saveNow(); });
+    $('#picklook').onclick = () => pick((p) => { $('#lookroot').value = p; saveNow(true); });
+    $('#pickfhq').onclick = () => pick((p) => { $('#fhqroot').value = p; saveNow(true); });
     $$('[data-rmsrc]').forEach((b) => (b.onclick = async () => { const o = collect(); o.sources.splice(+b.dataset.rmsrc, 1); const r = await api('/settings?report=1', o); S.settings = r.settings; toast(`Removed. Forgot ${fmtNum(r.cleaned.filesRemoved)} scanned files.`); await refreshState(); this.render(el); }));
     $$('[data-rmref]').forEach((b) => (b.onclick = async () => {
       const path = $(`[data-ref="${b.dataset.rmref}"]`).value.trim();
@@ -126,11 +144,17 @@ views.setup = {
       await refreshState(); this.render(el);
     }));
     $$('[data-forgetkept]').forEach((b) => (b.onclick = async () => { if (!(await confirmBox('Forget what was learned?', 'Everything learned from <code>' + esc(b.dataset.forgetkept) + '</code> is removed. The files themselves are not touched.', 'Forget it', true))) return; const r = await api('/refs/forget-kept', { path: b.dataset.forgetkept }); toast(`Forgot ${fmtNum(r.removed)} learned examples.`); await refreshState(); this.render(el); }));
-    $$('[data-src],[data-ex],[data-ref],[data-path],#dest').forEach((i) => (i.onchange = () => saveNow(true).then(() => refreshState())));
+    $$('[data-src],[data-ex],[data-ref],[data-path],#dest,#lookroot,#fhqroot').forEach((i) => (i.onchange = () => saveNow(true).then(() => refreshState())));
     $$('[data-def]').forEach((b) => (b.onclick = () => { const f = FIELD_BY_PATH[b.dataset.def]; const i = $(`[data-path="${f.path}"]`); i.value = String(f.def); saveNow(true); toast(`${f.label}: back to ${f.rec}`); }));
     if (0) $$('[data-grpreset]').forEach((b) => (b.onclick = async () => { const g = SETTING_GROUPS.find((x) => x.id === b.dataset.grpreset); g.fields.forEach((f) => { if (f.path !== 'saucenao.apiKey') { const i = $(`[data-path="${f.path}"]`); if (i) i.value = String(f.def); } }); await saveNow(true); toast(`${g.title}: back to the recommended values`); }));
     const tm = $('#testmodels'); if (tm) tm.onclick = async () => { const o = $('#modeltest'); tm.disabled = true; o.textContent = 'Loading the models and running a test picture… (the big model can take a minute)'; try { const r = await api('/models/test', {}); o.innerHTML = r.ok ? `<span class="chip ok">Works</span> ${esc(r.model)} on ${r.provider === 'dml' ? 'your graphics card (DirectML' + (r.gpu ? ': ' + esc(r.gpu) : '') + ')' : esc(r.provider)}, ready in ${r.seconds}s.${r.note ? ' <br>' + esc(r.note) : ''}` : `<span class="chip bad">Failed</span> ${esc(r.error)}`; } catch (e) { o.textContent = 'Test failed: ' + e.message; } tm.disabled = false; };
     const dl = $('#dlmodels'); if (dl) dl.onclick = async () => { const r = await api('/models/download', {}); toast(r.queued ? 'The download is queued after the current job.' : 'Downloading… the status bar shows the progress.', 'info'); };
+    $$('input[name=tgsort]').forEach((r) => (r.onchange = async () => { const o = clone(S.settings); o.tagger = { ...(o.tagger || {}), model: r.value }; S.settings = await api('/settings', o); await refreshState(); toast(`The sorting now uses ${((S.tagger.options || []).find((x) => x.key === r.value) || {}).short}’s tags where it has them.`); this.render(el); }));
+    $$('[data-dltag]').forEach((b) => (b.onclick = async () => { const r = await api('/models/download-tagger', { tagger: b.dataset.dltag }); toast(r.queued ? 'The download is queued after the current job.' : 'Downloading… the status bar shows the progress.', 'info'); }));
+    const retag = (body, what) => async () => { try { const r = await api('/retag', body); if (r.error) return toast(r.error, true); toast(`${what}${r.queued ? ' (queued after the current job)' : ''}. The status bar shows the progress.`, 'info'); } catch (e) { toast(e.message, true); } };
+    $$('[data-tagall]').forEach((b) => (b.onclick = retag({ tagger: b.dataset.tagall, scope: 'files' }, 'Tagging the pictures again')));
+    $$('[data-tagrefs]').forEach((b) => (b.onclick = retag({ tagger: b.dataset.tagrefs, scope: 'refs' }, 'Tagging the examples again')));
+    const tmb = $('#tagmissing'); if (tmb) tmb.onclick = async () => { await retag({ scope: 'missing' }, 'Tagging the pictures that have no tags from it yet')(); await retag({ scope: 'missingRefs' }, 'Tagging the examples too')(); };
     const start = (url, body) => async () => { await saveNow(true); try { const r = await api(url, body); toast(r && r.queued ? 'Added to the queue. It starts when the current job finishes.' : 'Started', 'info'); } catch (e) { toast(e.message, true); } };
     $('#run').onclick = start('/run', { refs: false }); $('#learn').onclick = start('/learn', {}); $('#runboth').onclick = start('/run', { refs: true });
     $('#redecide').onclick = async () => { await saveNow(true); await api('/redecide', {}); };

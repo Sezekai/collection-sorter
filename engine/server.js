@@ -10,7 +10,6 @@ const P = require('./pipeline');
 const { readCatalog, destinationChoices } = require('./catalog');
 const { ensureThumb, thumbPath } = require('./thumbs');
 const mover = require('./mover');
-const sauce = require('./saucenao');
 const { log } = require('./util');
 const resetMod = require('./reset');
 const UIFILE = path.join(settingsMod.DATA_DIR, 'ui.json');
@@ -28,11 +27,10 @@ const body = (req) => new Promise((resolve, reject) => { const c = []; req.on('d
 const EFF = `coalesce(s.user_folder, s.folder)`;
 // pictures that are still waiting in the Duplicates or Connected sets screens are not shown in Review until you have dealt with them there
 const HIDE = `f.id not in (select m.file_id from dupe_members m join dupe_groups g on g.id=m.group_id where g.state='pending' and m.decision is null) and f.id not in (select sm.file_id from set_members sm join sets_ st on st.id=sm.set_id where st.state='pending')`;
-const fhqName = () => String(settingsMod.load().fhqFolder || 'Find Higher Quality').toLowerCase();
-// scope: new = waiting for review | fhq = moved into a Find Higher Quality folder | sauce = sent to SauceNAO (any status)
+// scope: new = waiting for review | any = every file the app knows
 function fromSql(scope) {
-  if (scope === 'new') return `from suggestions s join files f on f.id=s.file_id left join sauce sa on sa.fp=f.fp`;
-  return `from files f left join suggestions s on s.file_id=f.id left join sauce sa on sa.fp=f.fp`;
+  if (scope === 'new') return `from suggestions s join files f on f.id=s.file_id`;
+  return `from files f left join suggestions s on s.file_id=f.id`;
 }
 
 // ---- duplicate groups: keep / send to Dupes / not duplicates, per picture or per group ----
@@ -75,8 +73,6 @@ function reviewWhere(q) {
   const scope = q.scope || 'new';
   const w = [], a = [];
   if (scope === 'new') { w.push(`f.status='new'`); if (!q.ids) w.push(HIDE); }
-  else if (scope === 'fhq') { w.push(`f.status='moved'`); w.push(`lower(replace(f.path,'\\','/')) like ?`); a.push(`%/${fhqName()}/%`); }
-  else if (scope === 'sauce') { w.push(`(f.status='new' or (f.status='moved' and lower(replace(f.path,'\\','/')) like ?))`); a.push(`%/${fhqName()}/%`); w.push(`sa.fp is not null`); if (q.sstate === 'done') w.push(`sa.state='done'`); else if (q.sstate === 'waiting') w.push(`sa.state in ('queued','error')`); }
   if (q.ids) { const ids = String(q.ids).split(',').map(Number).filter(Boolean); w.push(`f.id in (${ids.map(() => '?').join(',') || 'null'})`); a.push(...ids); }
   if (q.lane) { w.push('s.lane=?'); a.push(q.lane); }
   if (q.state) { w.push('s.state=?'); a.push(q.state); }
@@ -86,7 +82,6 @@ function reviewWhere(q) {
   if (q.kind) { w.push('f.kind=?'); a.push(q.kind); }
   if (q.realm === 'art' || q.realm === 'real') { w.push(`coalesce(f.realness,'art')=?`); a.push(q.realm); }
   if (q.fhq === '1') w.push('s.fhq=1');
-  if (q.hq === '1') w.push(`json_extract(sa.result,'$.hq') is not null`);
   if (q.minScore) { w.push('s.score>=?'); a.push(+q.minScore); }
   if (q.maxScore) { w.push('s.score<=?'); a.push(+q.maxScore); }
   if (q.rating) { w.push(`coalesce(s.user_rating,s.rating)=?`); a.push(q.rating); }
@@ -95,9 +90,9 @@ function reviewWhere(q) {
   const inc = q.tinc ? String(q.tinc).split('|').filter(Boolean) : [], exc = q.texc ? String(q.texc).split('|').filter(Boolean) : [];
   if (inc.length) {
     const ph = inc.map(() => '?').join(',');
-    w.push(`(select count(distinct t.tag) from file_tags t where t.file_id=f.id and t.conf>=? and t.tag in (${ph})) ${q.tmode === 'any' ? '>= 1' : '= ' + inc.length}`); a.push(tmin, ...inc);
+    w.push(`(select count(distinct t.tag) from file_tags t where t.file_id=f.id and t.src=? and t.conf>=? and t.tag in (${ph})) ${q.tmode === 'any' ? '>= 1' : '= ' + inc.length}`); a.push(q.tsrc || '', tmin, ...inc);
   }
-  if (exc.length) { w.push(`not exists (select 1 from file_tags t where t.file_id=f.id and t.conf>=? and t.tag in (${exc.map(() => '?').join(',')}))`); a.push(tmin, ...exc); }
+  if (exc.length) { w.push(`not exists (select 1 from file_tags t where t.file_id=f.id and t.src=? and t.conf>=? and t.tag in (${exc.map(() => '?').join(',')}))`); a.push(q.tsrc || '', tmin, ...exc); }
   return { sql: w.join(' and ') || '1=1', args: a, scope };
 }
 const ORDER = {
@@ -109,55 +104,17 @@ const ORDER = {
   folder: `coalesce(s.user_folder, s.folder) collate nocase, f.id`, folder_desc: `coalesce(s.user_folder, s.folder) collate nocase desc, f.id`,
   rating: `case coalesce(s.user_rating, s.rating) when 'very' then 2 when 'nsfw' then 1 else 0 end desc, f.id`, rating_asc: `case coalesce(s.user_rating, s.rating) when 'very' then 2 when 'nsfw' then 1 else 0 end asc, f.id`,
   moved: 'f.moved_at desc, f.id', moved_asc: 'f.moved_at asc, f.id',
-  sauce: 'sa.ts desc', sauce_asc: 'sa.ts asc',
-  hq: `coalesce(json_extract(sa.result,'$.hq.factor'),0) desc, sa.ts desc`, hq_asc: `case when json_extract(sa.result,'$.hq.factor') is null then 1 else 0 end, json_extract(sa.result,'$.hq.factor') asc`,
 };
 
 function item(r) {
-  let sauceRes = null; try { sauceRes = r.sauce_result ? JSON.parse(r.sauce_result) : null; } catch { /* none */ }
   return {
     id: r.fid, name: path.basename(r.path), path: r.path, kind: r.kind, w: r.w, h: r.h, size: r.size, duration: r.duration, status: r.fstatus,
     lane: r.lane, folder: r.folder, userFolder: r.user_folder, score: r.score, reason: r.reason, rating: r.rating, userRating: r.user_rating,
     fallback: r.fallback, fallbackRating: r.fallback_rating, alt: r.alt ? JSON.parse(r.alt) : [], series: r.series, state: r.state || (r.fstatus === 'moved' ? 'moved' : 'pending'), setId: r.set_id,
-    fhq: r.fhq ? 1 : 0, tagger: r.tagger_used || null, realness: r.realness_ || 'art', realBy: r.real_by_ || null, pClip: r.pclip_, pJoy: r.pjoy_, sauce: r.sauce_state ? { state: r.sauce_state, result: sauceRes } : null, mtime: r.mtime,
+    fhq: r.fhq ? 1 : 0, tagger: r.tagger_used || null, realness: r.realness_ || 'art', realBy: r.real_by_ || null, pClip: r.pclip_, pJoy: r.pjoy_, mtime: r.mtime,
   };
 }
-const ITEM_COLS = `s.*, f.id fid, f.status fstatus, f.path, f.w, f.h, f.size, f.kind, f.duration, f.mtime, f.tagger tagger_used, f.realness realness_, f.real_by real_by_, f.p_clip pclip_, f.p_joy pjoy_, sa.state sauce_state, sa.result sauce_result`;
-
-// ---- Find Higher Quality: scan the folders on disk ----
-async function refreshFhq() {
-  const S = settingsMod.load(); const root = S.destinationRoot; const d = db.get();
-  const { kindOf, pkey } = require('./util'); const sharp = require('sharp'); const { fingerprint } = require('./hashing');
-  if (!root || !fs.existsSync(root)) return { added: 0, missing: 0 };
-  const want = fhqName(); let added = 0, missing = 0;
-  const found = [];
-  const walk = (dir, depth) => {
-    if (depth > 5) return;
-    let ents; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-    for (const e of ents) {
-      const abs = path.join(dir, e.name);
-      if (e.isDirectory()) { if (e.name.toLowerCase() === want) collect(abs); else walk(abs, depth + 1); }
-    }
-  };
-  const collect = (dir) => { let ents; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; } for (const e of ents) { const abs = path.join(dir, e.name); if (e.isDirectory()) collect(abs); else if (e.isFile() && kindOf(e.name)) found.push(abs); } };
-  walk(root, 0);
-  const have = new Set(d.prepare(`select pkey from files`).all().map((r) => r.pkey));
-  for (const abs of found) {
-    const k = pkey(abs); if (have.has(k)) continue;
-    let st; try { st = fs.statSync(abs); } catch { continue; }
-    const kind = kindOf(path.basename(abs)); let w = 0, h = 0;
-    if (kind === 'image') { try { const m = await sharp(abs, { failOn: 'none' }).metadata(); w = m.width || 0; h = m.height || 0; } catch { /* unknown size */ } }
-    let fp = null; try { fp = await fingerprint(abs, st.size); } catch { /* none */ }
-    d.prepare(`insert or ignore into files(path,pkey,size,mtime,kind,ext,w,h,fp,analyzed,status,moved_at) values(?,?,?,?,?,?,?,?,?,4,'moved',?)`).run(abs, k, st.size, st.mtimeMs, kind, path.extname(abs).toLowerCase(), w, h, fp, st.mtimeMs);
-    added++;
-  }
-  const hasAny = new Set(found.map(pkey));
-  for (const r of d.prepare(`select id,path,pkey from files where status='moved'`).all()) {
-    if (lowerSlash(r.path).includes('/' + want + '/') && !hasAny.has(r.pkey) && !fs.existsSync(r.path)) { d.prepare(`update files set status='gone' where id=?`).run(r.id); missing++; }
-  }
-  return { added, missing, total: found.length };
-}
-const lowerSlash = (p) => p.replace(/\\/g, '/').toLowerCase();
+const ITEM_COLS = `s.*, f.id fid, f.status fstatus, f.path, f.w, f.h, f.size, f.kind, f.duration, f.mtime, f.tagger tagger_used, f.realness realness_, f.real_by real_by_, f.p_clip pclip_, f.p_joy pjoy_`;
 
 // ---- hover preview for videos: a strip of frames, cached ----
 const spriteInflight = new Map();
@@ -181,6 +138,17 @@ async function spriteFor(row) {
   spriteInflight.set(row.id, pr); return pr;
 }
 
+// how many pictures / examples each tagger has tagged (cached briefly: it is part of every /api/state)
+let covCache = { t: 0, v: null };
+P.bus.on('job', () => { covCache.t = 0; });   // a finished download or tagging job shows at once
+// tagger coverage, missing counts and which taggers are downloaded change slowly: worked out at most every 4 s (they cost ~100 ms together on a big library)
+function tagCoverage() {
+  if (Date.now() - covCache.t > 4000 || !covCache.v) {
+    const D = require('./models/download'); const ready = {}; for (const key of Object.keys(require('./models').TAGGERS)) ready[key] = D.taggerReady(P.modelDir(), key);
+    covCache = { t: Date.now(), v: require('./tags').coverage(), missing: { files: P.missingSortTags('files'), refs: P.missingSortTags('refs') }, ready };
+  }
+  return covCache;
+}
 function learnedInfo() {
   const L = db.kvGet('learned', null); if (!L || !L.nsfw) return null;
   const f = (c) => ({ trained: !!c.model, n: c.n, counts: c.counts, accuracy: c.accuracy, kind: c.kind });
@@ -196,11 +164,11 @@ async function api(req, res, u) {
     // progress at most 6 times a second (the last one is always sent), so the window isn't kept busy redrawing
     let pT = 0, pTimer = null, pLast = null, pPhase = null;
     const onP = (e) => { pLast = e; const now = Date.now(); if (e.finished || e.phase !== pPhase || now - pT >= 160) { pT = now; pPhase = e.phase; clearTimeout(pTimer); pTimer = null; return push('progress', e); } if (!pTimer) pTimer = setTimeout(() => { pTimer = null; pT = Date.now(); push('progress', pLast); }, 160 - (now - pT)); };
-    const onJ = (e) => push('job', e), onS = (e) => push('sauce', e), onQ = (e) => push('queue', e), onL = (e) => push('log', e);
-    P.bus.on('progress', onP); P.bus.on('job', onJ); P.bus.on('sauce', onS); P.bus.on('queue', onQ); require('./util').logBus.on('line', onL);
-    push('hello', { job: P.state.job, progress: P.state.progress, sauce: { ...P.sauceState }, queue: P.queueInfo(), last: P.state.last });
+    const onJ = (e) => push('job', e), onQ = (e) => push('queue', e), onL = (e) => push('log', e);
+    P.bus.on('progress', onP); P.bus.on('job', onJ); P.bus.on('queue', onQ); require('./util').logBus.on('line', onL);
+    push('hello', { job: P.state.job, progress: P.state.progress, queue: P.queueInfo(), last: P.state.last });
     const t = setInterval(() => res.write(': ping\n\n'), 20000);
-    req.on('close', () => { clearInterval(t); clearTimeout(pTimer); P.bus.off('progress', onP); P.bus.off('job', onJ); P.bus.off('sauce', onS); P.bus.off('queue', onQ); require('./util').logBus.off('line', onL); });
+    req.on('close', () => { clearInterval(t); clearTimeout(pTimer); P.bus.off('progress', onP); P.bus.off('job', onJ); P.bus.off('queue', onQ); require('./util').logBus.off('line', onL); });
     return;
   }
   if (p === '/api/state') {
@@ -215,12 +183,16 @@ async function api(req, res, u) {
       (select count(*) from suggestions s join files f on f.id=s.file_id where f.status='new' and s.state='pending' and ${HIDE} and f.realness='real') real_pending`).get();
     const todo = d().prepare(`select (select count(*) from files where status='new' and analyzed=0) files, (select count(*) from refs where analyzed=0) refs, (select count(*) from refs where analyzed=3) refsMore`).get();
     return send(res, 200, { settings: S, counts: c, todo, changes: db.kvGet('changes', null), folderChanges: ((db.kvGet('folderPending', null) || {}).gone || []).length, lastRescan: db.kvGet('lastRescan', null), job: P.state.job, queue: P.queueInfo(), last: P.state.last, safeMode: !!process.env.CS_SAFE, progress: P.state.progress, modelsReady: P.modelsReady(), modelDir: P.modelDir(), provider: P.state.models && P.state.models.provider, message: P.state.message, version: 2,
-      tagger: { model: P.taggerKey(), options: Object.entries(require('./models').TAGGERS).map(([key, t]) => ({ key, label: t.label })), used: db.kvGet('taggerUsed', c.analyzed ? 'swinv2' : null) }, learned: learnedInfo(), sauce: { ...P.sauceState }, modelNote: P.state.modelNote || '', classifier: (() => { const cl = require('./classify'); const sb = cl.scoreboard(); const learnedC = db.kvGet('classifier', null); return { model: (S.classify || {}).model || 'auto', using: cl.chooseModel(S, sb), scoreboard: sb, joytag: P.joytagReady(), learned: learnedC ? { clip: { trained: !!learnedC.clip.model, counts: learnedC.clip.counts, accuracy: learnedC.clip.accuracy }, joytag: { trained: !!learnedC.joy.model, counts: learnedC.joy.counts, accuracy: learnedC.joy.accuracy } } : null }; })(), retag: P.retagCount(), modelInfo: P.state.models ? { key: P.state.models.key, label: P.state.models.label, provider: P.state.models.provider, gpu: P.state.models.gpu || '' } : null, problems: { files: d().prepare(`select err, count(*) n from files where analyzed=2 and status='new' group by err order by n desc limit 5`).all(), refs: d().prepare(`select err, count(*) n from refs where analyzed=2 group by err order by n desc limit 5`).all() } });
+      tagger: { model: P.taggerKey(), options: Object.entries(require('./models').TAGGERS).map(([key, t]) => ({ key, label: t.label, short: t.short, ready: tagCoverage().ready[key] })), coverage: tagCoverage().v, missing: tagCoverage().missing }, learned: learnedInfo(), modelNote: P.state.modelNote || '', classifier: (() => { const cl = require('./classify'); const sb = cl.scoreboard(); const learnedC = db.kvGet('classifier', null); return { model: (S.classify || {}).model || 'auto', using: cl.chooseModel(S, sb), scoreboard: sb, joytag: P.joytagReady(), learned: learnedC ? { clip: { trained: !!learnedC.clip.model, counts: learnedC.clip.counts, accuracy: learnedC.clip.accuracy }, joytag: { trained: !!learnedC.joy.model, counts: learnedC.joy.counts, accuracy: learnedC.joy.accuracy } } : null }; })(), retag: P.retagCount(), modelInfo: P.state.models ? { key: P.state.models.key, label: P.state.models.label, provider: P.state.models.provider, gpu: P.state.models.gpu || '' } : null, problems: { files: d().prepare(`select err, count(*) n from files where analyzed=2 and status='new' group by err order by n desc limit 5`).all(), refs: d().prepare(`select err, count(*) n from refs where analyzed=2 group by err order by n desc limit 5`).all() } });
   }
   if (p === '/api/settings') {
     if (m === 'POST') {
-      const before = JSON.stringify((settingsMod.load().tagSource) || {}); const s = settingsMod.save(await body(req)); P.dropModels();
-      if (JSON.stringify(s.tagSource || {}) !== before) { try { require('./tags').fillAll(); } catch (e) { log('tag refill failed', e.message); } } // another tag source: rebuild the tag lists from what is already stored
+      const S0 = settingsMod.load(); const before = JSON.stringify(S0.tagSource || {}); const tk0 = P.taggerKey(); const dev0 = JSON.stringify([(S0.tagger || {}).device, (S0.tagger || {}).deviceId, (S0.classify || {}).useJoytag]);
+      const s = settingsMod.save(await body(req)); covCache.t = 0;
+      if (P.taggerKey() !== tk0 || JSON.stringify([(s.tagger || {}).device, (s.tagger || {}).deviceId, (s.classify || {}).useJoytag]) !== dev0) P.dropModels();
+      if (P.taggerKey() !== tk0) P.switchSortTagger().catch((e) => log.warn('switching the sorting tags failed', e.message));   // the sorting now uses the newly chosen tagger's tags
+      else if (JSON.stringify(s.tagSource || {}) !== before) require('./tags').fillAll().catch((e) => log('tag refill failed', e.message)); // another tag source: rebuild the tag lists from what is already stored
+      if ((s.fhqRoot !== S0.fhqRoot || s.lookupRoot !== S0.lookupRoot) && !db.kvGet('migrated17', false)) P.job('relocate', () => require('./lookup').migrate(), 'Tidy up Find Higher Quality and Look Up').catch((e) => log.error('1.7 tidy-up failed:', e.message));   // the folders it was waiting for are set now
       let cleaned = { filesRemoved: 0, examplesRemoved: 0 };
       if (!P.state.job) { try { cleaned = resetMod.cleanup(s); } catch (e) { log('cleanup failed', e.message); } }
       return send(res, 200, q.report ? { settings: s, cleaned } : s);
@@ -284,7 +256,7 @@ async function api(req, res, u) {
     return send(res, 200, { subTargets: subs });
   }
   // ---------- examples manager + what the app knows ----------
-  if (p.startsWith('/api/refs/') && ['overview', 'probe', 'use', 'map', 'automatch', 'cap'].includes(p.slice(10))) {
+  if (p.startsWith('/api/refs/') && ['overview', 'probe', 'use', 'map', 'automatch', 'cap', 'mkdir'].includes(p.slice(10))) {
     const K = require('./knowledge'); const S0 = settingsMod.load();
     const dests = () => { const cat = readCatalog(S0.destinationRoot, S0); return destinationChoices(cat, settingsMod.load()); };
     const ov = () => K.overview(settingsMod.load(), dests());
@@ -307,6 +279,20 @@ async function api(req, res, u) {
       for (const R of o.roots) for (const g of R.groups) if (g.use && !g.ok && g.suggested) { map[g.rel] = g.suggested; n++; }
       settingsMod.replace({ ...S0, referenceMap: map }); b.matched = n;
     }
+    if (p === '/api/refs/mkdir') {            // no destination folder by that name: make it (in the destination), and let this examples folder teach it
+      const name = String(b.name || '').trim().replace(/[<>:"|?*]/g, '').replace(/^[\\/]+|[\\/]+$/g, '');
+      if (!name || /(^|[\\/])\.\.?([\\/]|$)/.test(name)) return send(res, 400, { error: 'That folder name can’t be used.' });
+      if (!S0.destinationRoot || !fs.existsSync(S0.destinationRoot)) return send(res, 400, { error: 'Set the destination folder first (Setup → Destination).' });
+      const dir = path.join(S0.destinationRoot, ...name.split(/[\\/]+/));
+      try { fs.mkdirSync(dir, { recursive: true }); } catch (e) { return send(res, 400, { error: `Could not make ${dir}: ${e.message}` }); }
+      log(`Made the destination folder ${dir} for the examples folder ${b.rel}`);
+      const choices = dests(); db.kvSet('catalogChoices', choices); P.currentRules();   // a folder you made here is not reported as "new" by the folder check
+      const real = choices.find((c) => c.toLowerCase() === name.toLowerCase()) || name;
+      const map = { ...(S0.referenceMap || {}) }; const key = Object.keys(map).find((k) => k.toLowerCase() === String(b.rel).toLowerCase());
+      const base = String(b.rel).split(/[\\/]/).pop().toLowerCase();
+      if (real.toLowerCase() === base) { if (key) delete map[key]; } else map[key || b.rel] = [real];   // same name: it matches by itself
+      settingsMod.replace({ ...S0, referenceMap: map });
+    }
     if (p === '/api/refs/cap') {
       const pf = { ...((S0.refs || {}).perFolder || {}) };
       if (b.cap === null || b.cap === '' || b.cap === undefined) delete pf[b.folder]; else pf[b.folder] = Math.max(0, Math.min(5000, +b.cap || 0));
@@ -314,7 +300,7 @@ async function api(req, res, u) {
       else settingsMod.replace({ ...S0, refs: { ...(S0.refs || {}), perFolder: pf } });
     }
     const S1 = settingsMod.load(); const r = K.remap(S1);   // examples already stored follow the new mapping straight away
-    if (p === '/api/refs/use' || p === '/api/refs/map' || p === '/api/refs/automatch') db.kvSet('learned', null);
+    if (p === '/api/refs/use' || p === '/api/refs/map' || p === '/api/refs/automatch' || p === '/api/refs/mkdir') db.kvSet('learned', null);
     return send(res, 200, { ...ov(), remapped: r, matched: b.matched });
   }
   if (p === '/api/knowledge') {
@@ -332,7 +318,7 @@ async function api(req, res, u) {
     for (const r of srcRows) { const root = (S0.referenceRoots || []).find((x) => K.relOf(x, r.path) !== null); const rel = root ? K.relOf(root, r.path).split('/').slice(0, root ? 1 : 0).join('/') : '(removed folder)'; const key = (root || '') + '\u0000' + rel; const g = groups.get(key) || { root: root || '', rel, files: 0, learned: 0 }; g.files++; if (r.analyzed === 1) g.learned++; groups.set(key, g); }
     const ids = d().prepare(`select f.id, s.score, s.reason, s.rating from suggestions s join files f on f.id=s.file_id where f.status='new' and s.state='pending' and ${EFF}=? order by s.score asc limit 12`).all(name);
     const cnt = d().prepare(`select count(*) c from suggestions s join files f on f.id=s.file_id where f.status='new' and s.state='pending' and ${EFF}=?`).get(name).c;
-    const cur = cnt ? d().prepare(`select t.tag, count(*) n from file_tags t where t.conf>=0.35 and t.cat=0 and t.file_id in (select f.id from suggestions s join files f on f.id=s.file_id where f.status='new' and s.state='pending' and ${EFF}=?) group by t.tag order by n desc limit 16`).all(name).map((r) => [r.tag, +(r.n / cnt).toFixed(2)]) : [];
+    const cur = cnt ? d().prepare(`select t.tag, count(*) n from file_tags t where t.src='' and t.conf>=0.35 and t.cat=0 and t.file_id in (select f.id from suggestions s join files f on f.id=s.file_id where f.status='new' and s.state='pending' and ${EFF}=?) group by t.tag order by n desc limit 16`).all(name).map((r) => [r.tag, +(r.n / cnt).toFixed(2)]) : [];
     return send(res, 200, { name, learned, sources: [...groups.values()].sort((a, b) => b.files - a.files), lowest: ids, pending: cnt, currentTags: cur, cap: ((S0.refs || {}).perFolder || {})[name] ?? (S0.refs || {}).maxPerFolder ?? 150 });
   }
   if (p === '/api/settings/defaults') return send(res, 200, settingsMod.DEFAULTS);
@@ -392,7 +378,7 @@ async function api(req, res, u) {
     const items = rows.map(item);
     if (q.withtags === '1' && items.length) { // top tags for the card view
       const tmin = q.tmin !== undefined && q.tmin !== '' ? +q.tmin : ((settingsMod.load().tagger || {}).minConfidence ?? 0.35);
-      const st = d().prepare('select tag,conf,cat from file_tags where file_id=? order by conf desc limit 160'); // every stored tag, even the unsure ones; the page dims those under the minimum
+      const st = d().prepare(`select tag,conf,cat from file_tags where file_id=? and src='' order by conf desc limit 160`); // every stored tag, even the unsure ones; the page dims those under the minimum
       for (const it of items) it.tags = st.all(it.id).map((t) => [t.tag, t.conf, t.cat]);
       for (const it of items) it.tmin = tmin;
     }
@@ -453,78 +439,42 @@ async function api(req, res, u) {
     if (moved.length) { if (P.state.job) return send(res, 409, { error: `Wait for "${P.state.job}" to finish first.` }); const r = await P.job('move', async () => mover.relocate(S, moved, b.folder, b.rating || null, 'Moved from a list')); result.moved = (result.moved || 0) + r.moved; result.failed = r.failed; }
     return send(res, 200, result);
   }
-  // Find Higher Quality: nothing better found -> park the pictures in one manual folder in the main directory
-  if (p === '/api/hq/manual' && m === 'POST') {
-    const b = await body(req); const ids = (b.ids || []).map(Number).filter(Boolean); const S = settingsMod.load();
-    if (!S.destinationRoot) return send(res, 400, { error: 'Set the destination folder first.' });
-    if (!ids.length) return send(res, 400, { error: 'Select pictures first.' });
+  // Look Up (L): straight into the Look Up folder (Videos / Real / NSFW / Very subfolders), journaled like any move
+  if (p === '/api/lookup' && m === 'POST') {
+    const b = await body(req); const ids = (b.ids || []).map(Number).filter(Boolean);
+    if (!ids.length) return send(res, 400, { error: 'Select files first.' });
     if (P.state.job) return send(res, 409, { error: `Wait for "${P.state.job}" to finish first.` });
-    const folder = S.fhqManualFolder || 'Find Higher Quality Manually';
-    const rows = d().prepare(`select id,path,fp,status from files where id in (${ids.map(() => '?').join(',')})`).all(...ids);
-    const r = await P.job('move', async () => mover.relocate(S, rows.filter((x) => x.status === 'moved').map((x) => x.id), folder, 'general', 'Find Higher Quality: sent to the manual folder'));
-    const news = rows.filter((x) => x.status === 'new').map((x) => x.id);
-    let n2 = { moved: 0 };
-    if (news.length) { db.tx(() => { for (const id of news) d().prepare(`update suggestions set user_folder=?, user_rating='general', fhq=0, state='approved' where file_id=?`).run(folder, id); }); n2 = await P.autoApply(news); }
-    const ins = d().prepare('insert into hq_log(ts,file_id,fp,name,path,event,detail) values(?,?,?,?,?,?,?)');
-    for (const x of rows) ins.run(Date.now(), x.id, x.fp, path.basename(x.path), x.path, 'manual', JSON.stringify({ folder }));
-    return send(res, 200, { moved: ((r && r.moved) || 0) + (n2.moved || 0), folder });
+    try { const r = await P.job('move', () => require('./lookup').sendToLookup(ids), 'Send to Look Up'); return send(res, 200, r); } catch (e) { return send(res, 400, { error: e.message }); }
   }
-  // Find Higher Quality: a better copy was found, so the old one went to the Recycle Bin (the app did that through Windows); keep a record
-  if (p === '/api/hq/found' && m === 'POST') {
-    const b = await body(req); const ids = (b.ids || []).map(Number).filter(Boolean); let n = 0, kept = 0;
-    const ins = d().prepare('insert into hq_log(ts,file_id,fp,name,path,event,detail) values(?,?,?,?,?,?,?)');
-    for (const id of ids) {
-      const f = d().prepare('select f.id,f.path,f.fp,f.w,f.h,f.size,sa.result sr from files f left join sauce sa on sa.fp=f.fp where f.id=?').get(id); if (!f) continue;
-      if (require('fs').existsSync(f.path)) { kept++; continue; } // not actually gone: leave it alone
-      let hq = null; try { hq = JSON.parse(f.sr || 'null').hq || null; } catch { /* none */ }
-      db.tx(() => { d().prepare(`update files set status='deleted' where id=?`).run(id); d().prepare('delete from suggestions where file_id=?').run(id); ins.run(Date.now(), id, f.fp, path.basename(f.path), f.path, 'trashed', JSON.stringify({ w: f.w, h: f.h, size: f.size, hq })); });
-      n++;
-    }
-    return send(res, 200, { recorded: n, stillThere: kept });
+  // the window sent these to the Recycle Bin (through Windows): forget them
+  if (p === '/api/deleted' && m === 'POST') { const b = await body(req); return send(res, 200, require('./lookup').recordDeleted((b.ids || []).map(Number).filter(Boolean))); }
+  // tag again with a tagger: { tagger, ids } or { tagger, scope: 'files' | 'refs' | 'missing' | 'missingRefs' }
+  if (p === '/api/retag' && m === 'POST') {
+    const b = await body(req); const key = b.tagger === 'joytag' ? 'joytag' : require('./models/tagger').SPECS[b.tagger] ? b.tagger : P.taggerKey();
+    if (key !== 'joytag' && !require('./models/download').taggerReady(P.modelDir(), key)) return send(res, 400, { error: `${require('./models').TAGGERS[key].short} isn't downloaded yet. Download it in Setup → AI models first.`, needDownload: key });
+    P.runRetag({ tagger: key, ids: b.ids || null, scope: b.scope || null }).catch(() => {}); return send(res, 200, startedReply());
   }
-  // the log: every picture that was looked up, where it is now, and what happened to it
-  if (p === '/api/lookup-log') {
-    const rows = d().prepare(`select sa.fp, sa.ts, sa.result, f.id fid, f.path, f.status, f.w, f.h from sauce sa left join files f on f.fp=sa.fp where sa.state='done' order by sa.ts desc limit ?`).all(+q.limit || 500);
-    const hq = d().prepare('select file_id, event, detail, ts from hq_log order by id').all(); const last = new Map(); for (const h of hq) last.set(h.file_id, h);
-    const root = (settingsMod.load().destinationRoot || '').replace(/\\/g, '/').replace(/\/+$/, '');
-    const out = rows.map((r) => {
-      let res = null; try { res = JSON.parse(r.result || 'null'); } catch { /* none */ }
-      const t = res && res.top; const h = last.get(r.fid); const pth = String(r.path || '').replace(/\\/g, '/');
-      const where = r.status === 'deleted' ? 'Moved to the Recycle Bin (higher quality found)' : h && h.event === 'manual' && r.status === 'moved' && pth.includes('/' + (settingsMod.load().fhqManualFolder || 'Find Higher Quality Manually')) ? 'Sent to the manual folder' : r.status === 'moved' ? 'Moved to ' + (root && pth.toLowerCase().startsWith(root.toLowerCase() + '/') ? pth.slice(root.length + 1).replace(/\/[^/]*$/, '') : pth) : r.status === 'new' ? 'Still waiting for review' : '';
-      return { ts: r.ts, name: pth.split('/').pop(), w: r.w, h: r.h, match: t ? (t.series || t.title || '') : '', similarity: t ? t.similarity : null, hq: res && res.hq ? { w: res.hq.w, h: res.hq.h, factor: res.hq.factor, url: res.hq.url } : null, where };
-    });
-    return send(res, 200, { rows: out });
-  }
+  if (p === '/api/models/download-tagger' && m === 'POST') { const b = await body(req); P.downloadTagger(b.tagger).catch(() => {}); return send(res, 200, startedReply()); }
   // tags: what tags exist (with counts) inside the current selection, like TagGUI's tag list
   if (p === '/api/tags') {
     const w = reviewWhere(q); const tmin = q.tmin !== undefined && q.tmin !== '' ? +q.tmin : ((settingsMod.load().tagger || {}).minConfidence ?? 0.35);
     const base = `${fromSql(w.scope)} where ${w.sql}`;
     const total = d().prepare(`select count(*) c ${base}`).get(...w.args).c;
-    const args = [tmin, ...w.args]; let like = '';
+    const args = [tmin, ...w.args]; let like = '';   // (t.src is bound first, in the query below)
     if (q.tq) { like = ' and t.tag like ?'; args.push('%' + String(q.tq).toLowerCase() + '%'); }
-    const rows = d().prepare(`select t.tag, t.cat, count(*) n, round(avg(t.conf),2) avg from file_tags t where t.conf>=? and t.file_id in (select f.id ${base})${like} group by t.tag order by n desc, t.tag limit ?`).all(...args, +q.limit || 500);
+    const rows = d().prepare(`select t.tag, t.cat, count(*) n, round(avg(t.conf),2) avg from file_tags t where t.src=? and t.conf>=? and t.file_id in (select f.id ${base})${like} group by t.tag order by n desc, t.tag limit ?`).all(q.tsrc || '', ...args, +q.limit || 500);
     return send(res, 200, { total, tags: rows });
   }
-  if (p === '/api/tags/file') {
-    const rows = d().prepare('select tag,conf,cat from file_tags where file_id=? order by conf desc').all(+q.id);
-    return send(res, 200, rows);
+  if (p === '/api/tags/file') {   // every tagger's tags for one picture: [{ src, tags:[{tag,conf,cat}] }], the sorting tags first
+    // the sorting tags from the flat table; each tagger's full set straight from what it stored
+    const T = require('./tags'); const by = new Map();
+    const srt = d().prepare(`select tag,conf,cat from file_tags where file_id=? and src='' order by conf desc`).all(+q.id); if (srt.length) by.set('', srt);
+    for (const s of d().prepare('select tagger,tags from tagsets where file_id=?').all(+q.id)) { const t = T.parse(s.tags); const l = []; for (const k of ['g', 'a', 'y', 'c']) for (const [tag, conf] of t[k] || []) l.push({ tag, conf, cat: T.CAT[k] }); l.sort((x, y) => y.conf - x.conf); by.set(s.tagger, l); }
+    const f = d().prepare('select tagger, realness from files where id=?').get(+q.id) || {};
+    const sets = [...by].map(([src, tags]) => ({ src, tags })).sort((a, b) => (a.src === '' ? -1 : b.src === '' ? 1 : a.src.localeCompare(b.src)));
+    return send(res, 200, { sets, sortTagger: f.tagger || null, realness: f.realness || 'art' });
   }
   // Find Higher Quality: re-scan the folders on disk so files you put there by hand show up too
-  if (p === '/api/fhq/refresh' && m === 'POST') { return send(res, 200, await refreshFhq()); }
-  if (p === '/api/sauce/queue' && m === 'POST') {
-    const b = await body(req); let ids = b.ids || [];
-    if (b.auto) ids = d().prepare(`select s.file_id id from suggestions s join files f on f.id=s.file_id where f.status='new' and f.kind='image' and (s.lane='unsorted' or (s.lane in ('art','photo') and s.score<?))`).all(+b.below || 0.5).map((r) => r.id);
-    const n = await sauce.queue(ids); const started = b.start === false ? false : P.sauceStart();
-    return send(res, 200, { queued: n, started, needKey: b.start !== false && !started && !P.sauceState.running });
-  }
-  if (p === '/api/sauce/dequeue' && m === 'POST') { const b = await body(req); sauce.dequeue(b.ids || []); return send(res, 200, { ok: true }); }
-  if (p === '/api/sauce/requeue' && m === 'POST') { const b = await body(req); sauce.requeue(b.ids || []); P.sauceStart(); return send(res, 200, { ok: true }); }
-  if (p === '/api/sauce/run' && m === 'POST') { return send(res, 200, { started: P.sauceStart() }); }
-  if (p === '/api/sauce/control' && m === 'POST') { const b = await body(req); const st = P.sauceState; if (b.action === 'pause') st.paused = true; if (b.action === 'resume') st.paused = false; if (b.action === 'cancel') { st.cancelled = true; st.paused = false; } return send(res, 200, { ...st }); }
-  if (p === '/api/sauce/stats') {
-    const r = d().prepare(`select sum(sa.state='queued') queued, sum(sa.state='done') done, sum(sa.state='error') error from sauce sa join files f on f.fp=sa.fp and f.status in ('new','moved')`).get();
-    return send(res, 200, { queued: r.queued || 0, done: r.done || 0, error: r.error || 0, worker: { ...P.sauceState } });
-  }
   if (p.startsWith('/api/sprite/')) { // a strip of frames spread over a video, for hover preview
     const id = +p.split('/').pop(); const row = d().prepare('select id,path,kind,duration from files where id=?').get(id);
     if (!row || row.kind !== 'video' || !fs.existsSync(row.path)) return send(res, 404, {});
@@ -720,7 +670,8 @@ function crashLog(kind, e) {
 process.on('uncaughtException', (e) => { crashLog('uncaught error', e); });
 process.on('unhandledRejection', (e) => { crashLog('unhandled promise rejection', e); });
 // Notes in the log when the engine was too busy to answer for a while, and what it was doing, so slowness can be traced.
-(() => { let last = Date.now(); setInterval(() => { const now = Date.now(); const lag = now - last - 500; last = now; if (lag > 1000) log.warn(`The engine was busy for ${(lag / 1000).toFixed(1)} s${P.state.job ? ' (' + P.state.job + ')' : ''}; the window waited that long.`); }, 500).unref(); })();
+let curReq = null;   // the request being answered (named in the "busy" lines of the log)
+(() => { let last = Date.now(); setInterval(() => { const now = Date.now(); const lag = now - last - 500; last = now; if (lag > 1000) log.warn(`The engine was busy for ${(lag / 1000).toFixed(1)} s${P.state.job ? ' (' + P.state.job + ')' : ''}${curReq ? ' answering ' + curReq.path : ''}; the window waited that long.`); }, 500).unref(); })();
 function startedReply() { const q = P.queueInfo(); return P.state.job && q.length ? { started: false, queued: true, position: q.length, running: P.state.job } : { started: true }; }
 function askMain(msg) {
   if (!process.send) return Promise.resolve({ unsupported: true });
@@ -742,10 +693,13 @@ function start(port = 0) {
   try { const ST = require('./storage'); fs.mkdirSync(ST.logsDir(), { recursive: true }); fs.mkdirSync(ST.cacheDir(), { recursive: true }); } catch { /* a missing drive is reported in Settings → Storage */ }
   // the AI models used to live on C:; when the program sits in an App folder they move next to it once, with progress
   setTimeout(() => { try { const ST = require('./storage'); if (ST.needsModelMove()) { log('Moving the AI models next to the program:', require('path').join(ST.ROOT, 'Models')); P.job('relocate', async (ctl) => { const r = await ST.move('models', require('path').join(ST.ROOT, 'Models'), P.emit, ctl); P.dropModels(); P.emit({ phase: 'done', finished: true, note: 'Models moved to ' + r.dest }); return { moved: r.files }; }, 'Move the AI models to ' + ST.ROOT).catch((e) => log.error('Moving the models failed:', e.message)); } } catch (e) { log.error('model move check failed', e.message); } }, 1500);
-  setTimeout(() => { try { const S0 = settingsMod.load(); if (S0.autoRescan !== false && ((S0.sources || []).length || S0.destinationRoot)) P.runRescan({ examples: S0.autoRescan === 'all' }).catch((e) => log('rescan failed', e.message)); } catch (e) { log('rescan failed', e.message); } }, 1500);
-  setTimeout(() => { try { require('./tags').ensureBuilt(); } catch (e) { log('tag index failed', e.message); } }, 500);
+  setTimeout(async () => {
+    try { if (!db.kvGet('migrated17', false) && require('./lookup').nothingToMigrate()) db.kvSet('migrated17', { ts: Date.now(), fresh: true }); if (!db.kvGet('migrated17', false)) await P.job('relocate', () => require('./lookup').migrate(), 'Tidy up Find Higher Quality and Look Up'); } catch (e) { log.error('1.7 tidy-up failed:', e.message); }
+    try { const S0 = settingsMod.load(); if (S0.autoRescan !== false && ((S0.sources || []).length || S0.destinationRoot)) P.runRescan({ examples: S0.autoRescan === 'all' }).catch((e) => log('rescan failed', e.message)); } catch (e) { log('rescan failed', e.message); }
+  }, 1500);
+  setTimeout(() => { require('./tags').ensureBuilt().catch((e) => log('tag index failed', e.message)); }, 500);
   const server = http.createServer(async (req, res) => {
-    const u = new url.URL(req.url, 'http://127.0.0.1');
+    const u = new url.URL(req.url, 'http://127.0.0.1'); curReq = { path: u.pathname, t: Date.now() }; res.on('finish', () => { curReq = null; });
     if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(req.headers.host || '')) { res.writeHead(403); return res.end(); }
     try {
       if (u.pathname.startsWith('/api/')) {

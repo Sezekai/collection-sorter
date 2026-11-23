@@ -11,16 +11,15 @@ const { buildRules, ROUTED } = require('./rules');
 const { decideAll } = require('./decide');
 const models = require('./models');
 const mover = require('./mover');
-const sauce = require('./saucenao');
 const reset = require('./reset');
 const destFolders = require('./folders');
 const { log } = require('./util');
 
 const bus = new EventEmitter();
 const state = { job: null, ctl: { paused: false, cancelled: false }, progress: null, models: null, modelError: null, message: '', queue: [], steps: null, gpu: null, last: null };
-const JOB_LABELS = { analysis: 'Scan & tag files', learn: 'Learn from examples', decide: 'Re-run suggestions', apply: 'Move approved files', undo: 'Put files back', regroup: 'Re-detect sets & duplicates', rescan: 'Check for changes', download: 'Download models', relocate: 'Move data', diagnose: 'Diagnose' };
+const JOB_LABELS = { analysis: 'Scan & tag files', learn: 'Learn from examples', decide: 'Re-run suggestions', apply: 'Move approved files', undo: 'Put files back', regroup: 'Re-detect sets & duplicates', rescan: 'Check for changes', download: 'Download models', retag: 'Tag again', relocate: 'Move data', diagnose: 'Diagnose' };
 // the steps of a scan, each shown as Done / now / Queued (STANDARDS.md "Progress you can trust")
-const STEP_OF = { scan: 'scan', refscan: 'learn', refs: 'learn', models: 'read', analyze: 'read', dupes: 'dupes', sets: 'sets', decide: 'choose' };
+const STEP_OF = { scan: 'scan', refscan: 'learn', refs: 'learn', models: 'read', analyze: 'read', retag: 'read', dupes: 'dupes', sets: 'sets', decide: 'choose' };
 const STEP_LABEL = { scan: 'Scan folders', learn: 'Learn from examples', read: 'Read and tag', dupes: 'Duplicates', sets: 'Connected sets', choose: 'Choose folders' };
 
 // Every progress message also carries what is running it and how long it will take, worked out from the phase's own speed.
@@ -44,7 +43,7 @@ function emit(ev) {
   const mi = state.models;
   if (mi) ev = { ...ev, model: (mi.label || mi.key) + (mi.jt ? ' + JoyTag' : ''), device: mi.provider === 'dml' ? 'Graphics card (DirectML)' + (mi.gpu ? ': ' + mi.gpu : '') : mi.provider === 'cpu' ? 'Processor' : mi.provider };
   if (state.steps) { const cur = STEP_OF[ev.phase]; const i = state.steps.findIndex((x) => x.key === cur); if (i >= 0) state.steps.forEach((x, j) => { if (j < i && x.state !== 'skip') x.state = 'done'; else if (j === i) x.state = 'now'; }); if (ev.finished) state.steps.forEach((x) => { if (x.state !== 'skip') x.state = 'done'; }); ev = { ...ev, steps: state.steps.filter((x) => x.state !== 'skip').map((x) => ({ label: STEP_LABEL[x.key], state: x.state })) }; }
-  if (state.gpu && STEP_OF[ev.phase] && ['learn', 'read'].includes(STEP_OF[ev.phase])) ev = { ...ev, gpu: state.gpu };
+  if (state.gpu && (ev.phase === 'retag' || (STEP_OF[ev.phase] && ['learn', 'read'].includes(STEP_OF[ev.phase])))) ev = { ...ev, gpu: state.gpu };
   state.progress = ev; bus.emit('progress', ev);
 }
 function modelDir() { return models.modelDir(settingsMod.load(), settingsMod.DATA_DIR); }
@@ -64,8 +63,17 @@ async function getModels() {
   if (state.modelNote) emit({ phase: 'models', note: state.modelNote });
   return state.models;
 }
-function dropModels() { state.models = null; state.modelNote = ''; }
+function dropModels() { try { models.releaseModels(state.models); } catch { /* gone */ } state.models = null; state.modelNote = ''; }
 
+// one more tagger (to try it, or to tag pictures again with it); the chosen tagger comes with "Download the AI models"
+function downloadTagger(key) {
+  const k = models.TAGGERS[key] ? key : taggerKey();
+  return job('download', async () => {
+    const dl = require('./models/download'); const dir = modelDir(); require('./util').ensureDir(dir);
+    for (const f of dl.taggerFiles(k)) if (!require('fs').existsSync(require('path').join(dir, f.dest))) await dl.downloadOne(f, dir, (p) => emit({ phase: 'download', ...p }));
+    emit({ phase: 'download', note: 'done', finished: true }); return {};
+  }, `Download ${models.TAGGERS[k].short}`);
+}
 function downloadModels() {
   return job('download', async () => {
     await models.ensureModels(modelDir(), taggerKey(), (p) => emit({ phase: 'download', ...p }), undefined, wantJoy());
@@ -166,11 +174,12 @@ function runAnalysis(opts = {}) {
     if (opts.refs !== false && (S.referenceRoots || []).length) await scanReferences(S, emit, ctl);
     if (ctl.cancelled) return { cancelled: true };
     const m = await getModels(); startGpuWatch();
-    if (opts.refs !== false) await analyzeRefs(m, S, ctl, emit, opts.refsOpts || {});
+    if (opts.refs !== false) { await analyzeRefs(m, S, ctl, emit, opts.refsOpts || {}); if (!ctl.cancelled && missingSortTags('refs')) await retagWork({ scope: 'missingRefs' }, ctl); }
     if (ctl.cancelled) return { cancelled: true };
     if (opts.files === false) { emit({ phase: 'done', note: 'Learning finished', finished: true }); return { learned: true }; }
-    markRetag(m);
     await analyzeFiles(m, S, ctl, emit);
+    if (ctl.cancelled) return { cancelled: true };
+    if (missingSortTags('files')) await retagWork({ scope: 'missing' }, ctl);   // pictures read before by another tagger get the chosen tagger's tags too
     if (ctl.cancelled) return { cancelled: true };
     if (!db.get().prepare(`select 1 x from files where status='new' and analyzed=0 limit 1`).get()) db.kvSet('taggerUsed', m.key || taggerKey());
     emit({ phase: 'dupes', note: 'Looking for duplicates...' });
@@ -204,15 +213,64 @@ const runRescan = (opts = {}) => job('rescan', async (ctl) => {   // opts.exampl
   return { newFiles, newExamples, ...changes };
 });
 
-// Pictures read by a different tagging model than the one chosen now are read again, so the better model's tags replace the old ones.
-function markRetag(m) {
-  const d = db.get(); const key = m.key || taggerKey();
-  d.prepare(`update files set tagger=? where tagger is null and analyzed=1`).run(db.kvGet('taggerUsed', null) || key);
-  const n = d.prepare(`update files set analyzed=0 where analyzed=1 and status='new' and tagger is not null and tagger!=?`).run(key).changes;
-  if (n) { db.kvSet('retagged', n); emit({ phase: 'scan', note: `${n} pictures were read with another model and will be read again with ${m.label || key}` }); }
-  return n;
+// Tagging again with another tagger: only the tagger runs (no CLIP, no metrics, nothing else is re-read). The new tags are kept
+// as that tagger's own set next to the others; when it is the tagger the sorting uses, the pictures' sorting tags switch to it.
+function markRetag() { return 0; }   // (a new tagger no longer means reading every file again)
+function missingSortTags(kind = 'files') {
+  const key = taggerKey(); const d = db.get();
+  return kind === 'refs' ? d.prepare(`select count(*) n from refs r where r.analyzed=1 and not exists (select 1 from ref_tagsets t where t.ref_id=r.id and t.tagger=?)`).get(key).n
+    : d.prepare(`select count(*) n from files f where f.analyzed=1 and f.status='new' and coalesce(f.realness,'art')='art' and not exists (select 1 from tagsets t where t.file_id=f.id and t.tagger=?)`).get(key).n;
 }
-function retagCount() { const key = taggerKey(); return db.get().prepare(`select count(*) n from files where analyzed=1 and status='new' and tagger is not null and tagger!=?`).get(key).n; }
+const retagCount = () => missingSortTags('files');
+// which = { tagger, ids?: [file ids], scope?: 'files' | 'refs' | 'missing' (files without the sorting tagger's tags) | 'missingRefs' }
+async function retagWork(which, ctl) {
+  const S = settingsMod.load(); const d = db.get(); const key = which.tagger || taggerKey();
+  const isJoy = key === 'joytag'; const sortK = taggerKey();
+  let rows;
+  if (which.ids && which.ids.length) { const ids = which.ids.map(Number); rows = []; for (let i = 0; i < ids.length; i += 400) { const c = ids.slice(i, i + 400); rows.push(...d.prepare(`select id,path,kind,ext,size from files where id in (${c.map(() => '?').join(',')}) and status in ('new','moved')`).all(...c)); } }
+  else if (which.scope === 'refs' || which.scope === 'missingRefs') rows = d.prepare(`select r.id,r.path,r.kind from refs r where r.analyzed=1 ${which.scope === 'missingRefs' ? 'and not exists (select 1 from ref_tagsets t where t.ref_id=r.id and t.tagger=?)' : ''} order by r.id`).all(...(which.scope === 'missingRefs' ? [key] : []));
+  else rows = d.prepare(`select f.id,f.path,f.kind,f.ext,f.size from files f where f.analyzed=1 and f.status='new' ${which.scope === 'missing' ? "and coalesce(f.realness,'art')='art' and not exists (select 1 from tagsets t where t.file_id=f.id and t.tagger=?)" : ''} order by f.id`).all(...(which.scope === 'missing' ? [key] : []));
+  const refs = which.scope === 'refs' || which.scope === 'missingRefs';
+  const total = rows.length; if (!total) return { tagged: 0, failed: 0 };
+  const label = isJoy ? 'JoyTag' : (models.TAGGERS[key] || {}).short || key;
+  emit({ phase: 'retag', done: 0, total, note: `Loading ${label}…` });
+  const m = await getModels(); startGpuWatch();
+  let tagger = null, own = false;
+  if (isJoy) { if (!m.jt) throw new Error('JoyTag is not loaded (it may be turned off, or not downloaded).'); tagger = m.jt; }
+  else if (m.key === key) tagger = m.wd;
+  else { tagger = await models.loadTagger(S, modelDir(), key, m); own = true; }
+  const { load, mergeFrames } = require('./analyze'); const tagsMod = require('./tags');
+  let done = 0, failed = 0, firstErr = ''; const touched = [];
+  try {
+    for (let s = 0; s < rows.length; s += 8) {
+      while (ctl.paused && !ctl.cancelled) await new Promise((r) => setTimeout(r, 300));
+      if (ctl.cancelled) break;
+      const chunk = rows.slice(s, s + 8);
+      const res = await require('./util').pool(chunk, 4, async (row) => {
+        try { const { works } = await load({ ...row, ext: row.ext || require('path').extname(row.path).toLowerCase(), size: row.size || 0 }, S); const ts = await tagger.tag(works); return { row, t: ts.length === 1 ? ts[0] : mergeFrames(ts) }; }
+        catch (e) { return { row, error: e.message }; }
+      });
+      db.tx(() => { for (const r of res) { if (r.error) { failed++; if (!firstErr) firstErr = r.error; continue; } if (refs) tagsMod.storeRefSet(r.row.id, key, r.t); else { tagsMod.storeSet(r.row.id, key, r.t); touched.push(r.row.id); } } });
+      if (!refs) tagsMod.applyActive(res.filter((r) => !r.error).map((r) => r.row.id), S);   // as it goes, so the lists update and nothing big is left for the end
+      done += chunk.length;
+      emit({ phase: 'retag', done, total, failed, note: `Tagging with ${label}${failed ? ` (first problem: ${firstErr.slice(0, 100)})` : ''}` });
+    }
+  } finally { if (own) tagger.release(); }
+  if (refs) { if (key === sortK) { await tagsMod.applyActiveRefs(S); db.kvSet('learned', null); } }
+  else if (touched.length) { if ((key === sortK || isJoy) && !ctl.cancelled) await decide({ onlyIds: touched }); }
+  emit({ phase: 'done', note: `Tagged ${done - failed} with ${label}`, finished: true });
+  return { tagged: done - failed, failed, tagger: key };
+}
+const runRetag = (which) => job('retag', (ctl) => retagWork(which, ctl), `Tag again with ${which.tagger === 'joytag' ? 'JoyTag' : (models.TAGGERS[which.tagger || taggerKey()] || {}).short || which.tagger}`);
+// The tagger the sorting uses changed: switch every picture to that tagger's tags where it has them (instant), re-learn, choose folders again.
+async function switchSortTagger() {
+  const S = settingsMod.load(); const tagsMod = require('./tags');
+  const ids = db.get().prepare(`select file_id from tagsets group by file_id`).all().map((r) => r.file_id);
+  for (let i = 0; i < ids.length; i += 10) { tagsMod.applyActive(ids.slice(i, i + 10), S); await new Promise((r) => setTimeout(r, 2)); }   // in small slices: the app keeps answering
+  const nr = await tagsMod.applyActiveRefs(S); db.kvSet('learned', null);
+  log(`Sorting tags now come from ${taggerKey()}: ${ids.length} pictures, ${nr} examples switched; ${missingSortTags('files')} pictures and ${missingSortTags('refs')} examples have no tags from it yet`);
+  if (ids.length && !state.job) runDecide().catch(() => {});   // nothing to re-sort on a fresh install
+}
 
 async function decide(opts = {}) {
   const S = settingsMod.load();
@@ -230,21 +288,6 @@ const runUndo = (kind, arg) => job('undo', async () => {
   const f = kind === 'batch' ? mover.undoBatch : kind === 'file' ? mover.undoFile : mover.undoFolder;
   const r = await f(arg, emit); emit({ phase: 'done', note: `Put back ${r.undone} file(s)`, finished: true }); return r;
 });
-// SauceNAO lookups run in the background on their own (they are slow by design and must not block moving or reviewing).
-const sauceState = { running: false, paused: false, cancelled: false, done: 0, found: 0, note: '' };
-function sauceStart() {
-  if (sauceState.running) return true;
-  const S = settingsMod.load();
-  if (!sauce.enginesFor(S.saucenao || {}).length) return false;
-  Object.assign(sauceState, { running: true, paused: false, cancelled: false, done: 0, found: 0, note: '' });
-  const { rules } = currentRules();
-  bus.emit('sauce', { ...sauceState });
-  sauce.run(S, rules, sauceState, (p) => { Object.assign(sauceState, { done: p.done ?? sauceState.done, found: p.found ?? sauceState.found, note: p.note || '' }); bus.emit('sauce', { ...sauceState }); })
-    .catch((e) => { sauceState.note = e.message; })
-    .finally(() => { sauceState.running = false; bus.emit('sauce', { ...sauceState }); });
-  return true;
-}
-
 // Approving moves files straight away. While another job runs (a scan, say) the move waits and happens when it ends.
 state.applyQueued = false;
 async function autoApply(ids) {
@@ -255,4 +298,4 @@ async function autoApply(ids) {
 bus.on('job', (e) => { if (!e.running && state.applyQueued) { state.applyQueued = false; setImmediate(() => runApply({ note: 'Approved' }).catch(() => {})); } });
 
 const runRegroup = () => job('regroup', async () => { const S = settingsMod.load(); emit({ phase: 'dupes', note: 'Looking for duplicates...' }); await findDupes(S, emit); emit({ phase: 'sets', note: 'Looking for connected sets...' }); findSets(S); return decide(); });
-module.exports = { busy, queueInfo, cancelAll, JOB_LABELS, startGpuWatch, runRescan, joytagReady, retagCount, taggerKey, sauceState, sauceStart, autoApply, defaultRules, runRegroup, reset, bus, state, emit, runAnalysis, runDecide, runApply, runUndo, downloadModels, getModels, dropModels, modelsReady, modelDir, currentRules, job };
+module.exports = { runRetag, switchSortTagger, missingSortTags, busy, queueInfo, cancelAll, JOB_LABELS, startGpuWatch, runRescan, joytagReady, retagCount, taggerKey, downloadTagger, autoApply, defaultRules, runRegroup, reset, bus, state, emit, runAnalysis, runDecide, runApply, runUndo, downloadModels, getModels, dropModels, modelsReady, modelDir, currentRules, job };

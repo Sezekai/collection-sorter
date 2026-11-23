@@ -103,7 +103,7 @@ function startEngine() {
 // minimise / maximise / close (coloured to match). The overlay is 1 px shorter so the strip's line runs under them.
 const OVERLAY = { color: '#0a0a0b', symbolColor: '#a0a0a7', height: 31 };
 async function createWindow() {
-  win = new BrowserWindow({ width: 1500, height: 940, minWidth: 1100, minHeight: 680, backgroundColor: '#0a0a0b', title: 'Collection Sorter', titleBarStyle: 'hidden', titleBarOverlay: OVERLAY, autoHideMenuBar: true, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: path.join(__dirname, 'preload.js') } });
+  win = new BrowserWindow({ width: 1500, height: 940, minWidth: 1100, minHeight: 680, backgroundColor: '#0a0a0b', title: 'Collection Sorter', icon: path.join(__dirname, 'icons', process.platform === 'win32' ? 'icon.ico' : 'icon.png'), titleBarStyle: 'hidden', titleBarOverlay: OVERLAY, autoHideMenuBar: true, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: path.join(__dirname, 'preload.js') } });
   Menu.setApplicationMenu(null);
   win.on('app-command', (e, cmd) => { if (cmd === 'browser-backward') win.webContents.send('cs-nav', -1); else if (cmd === 'browser-forward') win.webContents.send('cs-nav', 1); });
   const ws = () => { if (!win.isDestroyed()) win.webContents.send('cs-winstate', { fullScreen: win.isFullScreen(), maximized: win.isMaximized() }); };

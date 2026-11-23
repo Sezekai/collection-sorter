@@ -2,7 +2,7 @@
 // Every step you take (a tag, a folder, a tab, opening a picture, a new screen) is one history entry, so the mouse Back / Forward buttons
 // (and Alt+Left / Alt+Right) walk through them like a browser: back from a tag selection goes to the previous selection, back from that to the picture, and so on.
 const NVH = { lock: false, pendingViewer: null, gate: 0 };
-const NVH_KEYS = ['lane', 'folder', 'state', 'sort', 'q', 'rating', 'kind', 'fhq', 'hq', 'tmode', 'tmin', 'tq', 'seed', 'sstate'];
+const NVH_KEYS = ['lane', 'folder', 'state', 'sort', 'q', 'rating', 'kind', 'fhq', 'tmode', 'tmin', 'tq', 'seed', 'tsrc'];
 function navSnap() {
   const r = curRoute(); const st = { r, viewer: null };
   try {

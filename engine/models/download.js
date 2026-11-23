@@ -5,28 +5,18 @@ const { ensureDir } = require('../util');
 
 const HF = () => (process.env.HF_ENDPOINT || 'https://huggingface.co').replace(/\/+$/, '');
 
-// The tagger that reads every picture. All three are SmilingWolf WD v3 taggers (the same family TagGUI offers); they differ in accuracy and speed.
-const TAGGERS = {
-  'eva02-large': { repo: 'SmilingWolf/wd-eva02-large-tagger-v3', dir: 'wd14-eva02-large', label: 'WD EVA02-Large v3 (most accurate, about 1.3 GB)' },
-  'vit-large': { repo: 'SmilingWolf/wd-vit-large-tagger-v3', dir: 'wd14-vit-large', label: 'WD ViT-Large v3 (accurate, about 1.3 GB)' },
-  'swinv2': { repo: 'SmilingWolf/wd-swinv2-tagger-v3', dir: 'wd14', label: 'WD SwinV2 v3 (fast, about 0.45 GB)' },
-};
-const taggerKey = (k) => (TAGGERS[k] ? k : 'eva02-large');
+// The tagger that reads every picture (Haruka by default; PixAI, Camie and the WD v3 family as options). See tagger.js for what each one needs.
+const { SPECS, taggerKey } = require('./tagger');
+const TAGGERS = Object.fromEntries(Object.entries(SPECS).map(([k, s]) => [k, { repo: s.repo, dir: s.dir, label: s.label, short: s.short }]));
 
-// JoyTag (fpgaminer/joytag): tags real photos far better than the anime-only WD taggers, and helps decide photo vs art
+// JoyTag (fpgaminer/joytag): tags real photos far better than the anime taggers, and helps decide photo vs art
 const JOYTAG_FILES = [
   { key: 'joy', name: 'model.onnx', repo: 'fancyfeast/joytag', file: 'model.onnx', dest: 'joytag/model.onnx', label: 'JoyTag (photos and art, about 0.37 GB)' },
   { key: 'joytags', name: 'top_tags.txt', repo: 'fancyfeast/joytag', file: 'top_tags.txt', dest: 'joytag/top_tags.txt', label: 'JoyTag tag list' },
 ];
-const filesFor = (tk, joy) => {
-  const t = TAGGERS[taggerKey(tk)];
-  return [
-    { key: 'wd14', name: 'model.onnx', repo: t.repo, file: 'model.onnx', dest: `${t.dir}/model.onnx`, label: 'Anime tagger — ' + t.label },
-    { key: 'wd14tags', name: 'selected_tags.csv', repo: t.repo, file: 'selected_tags.csv', dest: `${t.dir}/selected_tags.csv`, label: 'Tagger tag list' },
-    ...CLIP_FILES,
-    ...(joy ? JOYTAG_FILES : []),
-  ];
-};
+// the two files of one tagger (its model and its tag list)
+const taggerFiles = (tk) => { const s = SPECS[taggerKey(tk)]; return s.files.map((f) => ({ key: f.key === 'model' ? 'wd14' : 'wd14tags', name: f.file, repo: s.repo, file: f.file, dest: `${s.dir}/${f.file}`, size: f.size || 0, label: f.key === 'model' ? s.short + ' tagger' : s.short + ' tag list' })); };
+const filesFor = (tk, joy) => [...taggerFiles(tk), ...CLIP_FILES, ...(joy ? JOYTAG_FILES : [])];
 const CLIP_FILES = [
   { key: 'clipv', name: 'vision_model.onnx', repo: 'Xenova/clip-vit-base-patch32', file: 'onnx/vision_model.onnx', dest: 'clip/vision_model.onnx', label: 'CLIP image model' },
   { key: 'clipt', name: 'text_model.onnx', repo: 'Xenova/clip-vit-base-patch32', file: 'onnx/text_model.onnx', dest: 'clip/text_model.onnx', label: 'CLIP text model' },
@@ -78,4 +68,5 @@ async function ensureModels(dir, tk, onProgress, signal, joy) {
   return modelPaths(dir, tk, joy);
 }
 
-module.exports = { TAGGERS, taggerKey, filesFor, modelPaths, missing, ensureModels, downloadOne };
+const taggerReady = (dir, tk) => taggerFiles(tk).every((f) => fs.existsSync(path.join(dir, f.dest)));
+module.exports = { TAGGERS, taggerKey, taggerFiles, taggerReady, filesFor, modelPaths, missing, ensureModels, downloadOne };

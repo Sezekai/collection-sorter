@@ -23,14 +23,13 @@ const DEFAULTS = {
   dupes: { maxHamming: 6, minClipSimilarity: 0.97 },
   videoFrames: 4,
   classify: { model: 'auto', useJoytag: true, photoAt: 0.5 }, // who decides photo vs art: auto (the one you correct least) | clip | joytag | both
-  tagSource: { art: 'wd', real: 'joytag' },          // which model's tags are shown and searched: wd | joytag | both
-  tagger: { model: 'eva02-large', device: 'auto', deviceId: -1, batch: 4, minConfidence: 0.35 },
-  saucenao: { apiKey: '', minSimilarity: 80, enabled: false, useIqdb: true, useAscii2d: true, biggerFactor: 1.2 },
+  tagSource: { art: 'wd', real: 'joytag' },          // which tags the sorting uses and the lists show: wd (= the chosen anime tagger) | joytag | both
+  tagger: { model: 'haruka', device: 'auto', deviceId: -1, batch: 4, minConfidence: 0.35 },
   subTargets: ['Real/Images/Cosplay', 'Real/Images/General', 'Real/Videos/Cosplay', 'Real/Videos/General'], // destination subfolders (any depth) offered as targets of their own
   autoRescan: true,               // look for new files / folders each time the app starts
   storage: { thumbs: '', cache: '' },   // '' = the default place (see storage.js); models live in models.dir
-  fhqManualFolder: 'Find Higher Quality Manually', // one folder in the main directory for pictures you will look for by hand
-  fhqFolder: 'Find Higher Quality', // subfolder used by the "Find higher quality" toggle
+  lookupRoot: '',                 // Look Up (L) sends pictures and videos here, in Videos / Real / NSFW / Very subfolders
+  fhqRoot: '',                    // Find higher quality (Q) files go here, in the folder they would have gone to (Anime/NSFW, …)
   keptReferenceRoots: [],         // removed example folders whose already-learned data is kept (never scanned again)
   refs: { maxPerFolder: 150, perFolder: {} },    // examples learned per folder (evenly sampled); perFolder overrides it for a named folder
   models: { dir: '' },
@@ -51,6 +50,14 @@ function load() {
   let saved = {};
   try { saved = JSON.parse(fs.readFileSync(FILE, 'utf8')); } catch { /* first run */ }
   cache = deepMerge(DEFAULTS, saved);
+  if (!saved.v17) {   // 1.7: Haruka is the default tagger; Look Up and Find Higher Quality are plain folders (next to the to-sort folders, when there is a "Sort" folder)
+    if (!saved.tagger || !saved.tagger.model || saved.tagger.model === 'eva02-large') cache.tagger = { ...cache.tagger, model: 'haruka' };
+    const sortDir = (cache.referenceRoots || []).map((r) => path.join(r, 'Sort')).find((p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } });
+    if (sortDir && !cache.lookupRoot) cache.lookupRoot = path.join(sortDir, 'Look Up');
+    if (sortDir && !cache.fhqRoot) cache.fhqRoot = path.join(sortDir, 'Find Higher Quality');
+    cache.v17 = true; delete cache.saucenao;
+    try { const tmp = FILE + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(cache, null, 2)); fs.renameSync(tmp, FILE); } catch { /* read-only: try again next time */ }
+  }
   const th = (saved.thresholds || {});
   if (th.bestGuess === undefined && th.unsortedBelow === 0.3) cache.thresholds.unsortedBelow = DEFAULTS.thresholds.unsortedBelow; // older default: the new "best guess" step replaces it
   return cache;

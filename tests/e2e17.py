@@ -122,8 +122,8 @@ try:
         pg.click('#pills .pill'); pg.wait_for_timeout(200); check('clicking again closes it', pg.locator('#pillpop').count()==0)
         pg.evaluate("Status.p=null; Status.pills(); Status.draw()"); pg.set_viewport_size({'width':1440,'height':900})
         # log drawer
-        pg.keyboard.press('l'); pg.wait_for_timeout(700); check('L opens the log', pg.locator('#logdrawer:not(.hidden)').count()==1 and 'Finished' in pg.inner_text('#logdrawer'))
-        pg.keyboard.press('l'); pg.wait_for_timeout(200); check('L closes it', pg.locator('#logdrawer.hidden').count()==1)
+        pg.keyboard.press('Control+l'); pg.wait_for_timeout(700); check('Ctrl+L opens the log', pg.locator('#logdrawer:not(.hidden)').count()==1 and 'Finished' in pg.inner_text('#logdrawer'))
+        pg.keyboard.press('Control+l'); pg.wait_for_timeout(200); check('Ctrl+L closes it', pg.locator('#logdrawer.hidden').count()==1)
         pg.evaluate("logLine('Something failed (test)','e')"); pg.wait_for_timeout(300); check('an error opens the log by itself', pg.locator('#logdrawer:not(.hidden)').count()==1); pg.keyboard.press('Escape')
         # keys
         pg.keyboard.press('s'); pg.wait_for_timeout(1200); check('S opens Settings', pg.evaluate("location.hash")=='#settings')
@@ -160,7 +160,7 @@ try:
         # every screen renders with the one-line header and no errors, at the minimum window size too
         for w,h in [(1100,680),(1920,1080)]:
             pg.set_viewport_size({'width':w,'height':h})
-            for r in ['setup','review','real','unsorted','tags','sets','dupes','fhq','sauce','knows','examples','rules','undo','look','settings']:
+            for r in ['setup','review','real','unsorted','tags','sets','dupes','knows','examples','rules','undo','look','settings']:
                 pg.goto(f'{base}/?t=t#'+r); pg.wait_for_timeout(900)
                 hd=pg.locator('#view .hd').count(); side=pg.evaluate("document.querySelector('#view').scrollWidth<=document.querySelector('#view').clientWidth+1")
                 if not (hd>=1 or r=='sauce') or not side: check(f'{r} at {w}: header line and no sideways scroll', False, (hd, side))

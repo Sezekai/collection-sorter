@@ -17,16 +17,15 @@ const fromBlob = (b) => new Float32Array(b.buffer.slice(b.byteOffset, b.byteOffs
 
 function mergeFrames(tagsList) {
   // videos: union of frame tags using the highest probability, rating = max over frames
-  const g = new Map(), c = new Map(), y = new Map();
+  const g = new Map(), c = new Map(), y = new Map(), a = new Map();
   const rating = { general: 0, sensitive: 0, questionable: 0, explicit: 0 };
+  const up = (m, list) => { for (const [n, p] of list || []) m.set(n, Math.max(m.get(n) || 0, p)); };
   for (const t of tagsList) {
-    for (const k of Object.keys(rating)) rating[k] = Math.max(rating[k], t.rating[k] || 0);
-    for (const [n, p] of t.general) g.set(n, Math.max(g.get(n) || 0, p));
-    for (const [n, p] of t.character) c.set(n, Math.max(c.get(n) || 0, p));
-    for (const [n, p] of t.copyright) y.set(n, Math.max(y.get(n) || 0, p));
+    if (t.rating) for (const k of Object.keys(rating)) rating[k] = Math.max(rating[k], t.rating[k] || 0);
+    up(g, t.general); up(c, t.character); up(y, t.copyright); up(a, t.artist);
   }
-  const top = (m, n) => [...m].sort((a, b) => b[1] - a[1]).slice(0, n);
-  return { rating, general: top(g, 100), character: top(c, 12), copyright: top(y, 8) };
+  const top = (m, n) => [...m].sort((x1, x2) => x2[1] - x1[1]).slice(0, n);
+  return { rating, general: top(g, 120), character: top(c, 12), copyright: top(y, 8), artist: top(a, 6) };
 }
 function meanEmb(list) {
   const d = list[0].length, o = new Float32Array(d);
@@ -68,7 +67,7 @@ async function runOne(row, models, settings) {
   return { m, primary, t, e, jt, pj, pc };
 }
 
-function packTags(t) { return JSON.stringify({ g: t.general, c: t.character, y: t.copyright }); }
+const packTags = (t) => tagsMod.pack(t);
 
 // Analyse pending files. ctl = { paused, cancelled }
 async function analyzeFiles(models, settings, ctl, onProgress) {
@@ -101,9 +100,11 @@ async function analyzeFiles(models, settings, ctl, onProgress) {
         upd.run(fp, m.w, m.h, m.duration || null, m.dhash || null, m.phash || null, m.sharp, m.bpp, m.grey, m.colorful, m.blockiness || null, q.score ?? null,
           t.rating.general, t.rating.sensitive, t.rating.questionable, t.rating.explicit, packTags(t), null, models.key || null, r.jt ? JSON.stringify({ g: r.jt.general }) : null, r.pj, r.pc, row.id);
         embIns.run(row.id, toBlob(e));
+        if (models.key) tagsMod.storeSet(row.id, models.key, t);
+        if (r.jt) tagsMod.storeSet(row.id, 'joytag', r.jt);
       }
     });
-    tagsMod.fill(results.filter((r) => !r.error).map((r) => r.row.id));
+    tagsMod.applyActive(results.filter((r) => !r.error).map((r) => r.row.id), settings);
     done += chunk.length;
     if (onProgress) onProgress({ phase: 'analyze', done, total, failed, note: failed ? `(first problem: ${firstErr.slice(0, 120)})` : '' });
     if (done >= 16 && failed >= done) throw new Error(`Every file failed to read, so the scan was stopped. First problem: ${firstErr.slice(0, 250)}`);
@@ -159,6 +160,8 @@ async function analyzeRefs(models, settings, ctl, onProgress, opts = {}) {
         if (r.error) { bad.run(r.error.slice(0, 300), r.row.id); failed++; if (!firstErr) { firstErr = r.error; log('example failed:', r.row.path, r.error); } continue; }
         const q = r.row.kind === 'image' ? { w: r.m.w, h: r.m.h, sharp: r.m.sharp, bpp: (r.row.size * 8) / Math.max(1, r.m.w * r.m.h), blk: r.m.blockiness, grey: r.m.grey, colorful: r.m.colorful } : null;
         upd.run(packTags(r.t), toBlob(r.e), q ? JSON.stringify(q) : null, JSON.stringify(r.t.rating), models.key || null, r.jt ? JSON.stringify({ g: r.jt.general }) : null, r.row.id);
+        if (models.key) tagsMod.storeRefSet(r.row.id, models.key, r.t);
+        if (r.jt) tagsMod.storeRefSet(r.row.id, 'joytag', r.jt);
       }
     });
     done += chunk.length;
@@ -168,4 +171,4 @@ async function analyzeRefs(models, settings, ctl, onProgress, opts = {}) {
   return { done, failed, total };
 }
 
-module.exports = { analyzeFiles, analyzeRefs, fromBlob, toBlob, mergeFrames, meanEmb };
+module.exports = { load, analyzeFiles, analyzeRefs, fromBlob, toBlob, mergeFrames, meanEmb };

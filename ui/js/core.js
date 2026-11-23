@@ -41,11 +41,13 @@ const ICONS = {
   log: '<path d="M4 6h16M4 12h16M4 18h10"/>', gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.8 1.2V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-2.9-1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3.1 14H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.2-2.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 10 3.1V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0 1.2 2.9H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   look: '<circle cx="13.5" cy="6.5" r="1.5"/><circle cx="17.5" cy="10.5" r="1.5"/><circle cx="8.5" cy="7.5" r="1.5"/><path d="M12 22a10 10 0 1 1 10-10c0 2.8-2.2 3-4 3h-2a2 2 0 0 0-1 3.7A2 2 0 0 1 12 22z"/>',
   x: '<path d="M18 6L6 18M6 6l12 12"/>', plus: '<path d="M12 5v14M5 12h14"/>', check: '<path d="M5 12l5 5 9-10"/>', chev: '<path d="M6 9l6 6 6-6"/>',
+  trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>', lookup: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>', tagagain: '<path d="M3 12V4h8l10 10-8 8L3 12z"/><path d="M15 3a6 6 0 0 1 6 6"/>',
+  play: '<path d="M7 4l13 8-13 8z"/>', pause: '<path d="M7 4v16M17 4v16"/>', vol: '<path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/>', mute: '<path d="M4 9v6h4l5 4V5L8 9z"/><path d="M17 9l5 6M22 9l-5 6"/>',
   keys: '<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h0M10 10h0M14 10h0M18 10h0M7 14h10"/>', full: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
 };
 ICONS.settings = ICONS.gear;
 const icon = (n) => `<svg class="ic" viewBox="0 0 24 24">${ICONS[n] || ''}</svg>`;
-const NAV = [['setup', 'Setup'], ['review', 'Art', 1], ['real', 'Real life', 1], ['unsorted', 'Unsorted'], ['tags', 'Tags'], ['sets', 'Connected sets'], ['dupes', 'Duplicates'], ['fhq', 'Find Higher Quality'], ['sauce', 'Source lookup'], ['knows', 'What it knows'], ['examples', 'Examples to learn from'], ['rules', 'Rules & ranking'], ['undo', 'Undo']];
+const NAV = [['setup', 'Setup'], ['review', 'Art', 1], ['real', 'Real life', 1], ['unsorted', 'Unsorted'], ['tags', 'Tags'], ['sets', 'Connected sets'], ['dupes', 'Duplicates'], ['knows', 'What it knows'], ['examples', 'Examples to learn from'], ['rules', 'Rules & ranking'], ['undo', 'Undo']];
 
 // ---------- preferences (kept by the engine, so they survive restarts) ----------
 let PREFS = { ap: {}, custom: [], nav: true, layout: 'grid', tile: 168, cols: 3, cardh: 190, widths: {}, volume: 0.6, muted: false, show: { name: true, dest: true, rating: true, conf: true, res: true, size: true, flags: true, why: true, tags: true } };
@@ -107,8 +109,7 @@ function connectEvents() {
   const es = new EventSource('/api/events' + tq);
   es.addEventListener('progress', (ev) => showProgress(JSON.parse(ev.data)));
   es.addEventListener('job', async (ev) => { const j = JSON.parse(ev.data); S.job = j.running ? j.name : null; if (j.queue) S.queue = j.queue; Status.job(j); await refreshState(); if (!j.running) { const v = views[curRoute()]; if (v && v.afterJob) v.afterJob(j.name); else route(true); } });
-  es.addEventListener('sauce', (ev) => { S.sauce = JSON.parse(ev.data); updateNavBadges(); Status.pills(); const v = views[curRoute()]; if (v && v.status && curRoute() === 'sauce') v.status(); if (!S.sauce.running && v && v.afterSauce) v.afterSauce(); });
-  es.addEventListener('hello', (ev) => { const h = JSON.parse(ev.data); S.queue = h.queue || []; if (h.job) { S.job = h.job; showProgress(h.progress); } else if (h.last && !Status.result) { Status.result = h.last; Status.draw(); } S.sauce = h.sauce; Status.pills(); });
+  es.addEventListener('hello', (ev) => { const h = JSON.parse(ev.data); S.queue = h.queue || []; if (h.job) { S.job = h.job; showProgress(h.progress); } else if (h.last && !Status.result) { Status.result = h.last; Status.draw(); } Status.pills(); });
   es.addEventListener('queue', (ev) => { S.queue = JSON.parse(ev.data); Status.draw(); Status.pills(); });
   es.addEventListener('log', (ev) => { const l = JSON.parse(ev.data); logLine(l.text, l.level, l.ts); });
   es.onerror = () => {};

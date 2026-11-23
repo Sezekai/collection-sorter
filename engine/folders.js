@@ -74,10 +74,15 @@ function changes() {
   const d = db.get(); const stash = db.kvGet('goneRules', null) || {};
   const cands = [...new Set([...(pend.added || []), ...gone.filter((g) => g.includes('/')).flatMap((g) => siblings(S, g)).filter((c) => !has.has(norm(c)))])].filter((c) => has.has(norm(c)) || fs.existsSync(path.join(S.destinationRoot || '', ...c.split('/')))).filter((c) => !gone.some((g) => norm(g) === norm(c)));
   const sug = suggest(gone, cands);
+  // counts in two grouped queries instead of two per folder (the per-folder 'like' scan took seconds on big libraries)
+  const refCount = new Map(); for (const r of d.prepare('select lower(folder) f, count(*) c from refs where folder is not null group by lower(folder)').all()) refCount.set(r.f, r.c);
+  const pendCount = new Map(); for (const r of d.prepare(`select lower(coalesce(s.user_folder, s.folder)) f, count(*) c from suggestions s join files f on f.id=s.file_id where f.status='new' group by 1`).all()) pendCount.set(r.f, r.c);
+  const ruleFolders = (db.kvGet('rules', null) || { folders: {} }).folders || {};
+  const exCount = (n) => { const k = n.toLowerCase(); let c = 0; for (const [f, v] of refCount) if (f === k || f.startsWith(k + '/')) c += v; return c; };
   const info = (n) => ({
-    name: n, hasRule: !!stash[n] || !!(db.kvGet('rules', null) || { folders: {} }).folders[n],
-    examples: d.prepare(`select count(*) c from refs where folder=? or lower(folder) like lower(?) || '/%'`).get(n, n).c,
-    pending: d.prepare(`select count(*) c from suggestions s join files f on f.id=s.file_id where f.status='new' and (s.folder=? or s.user_folder=?)`).get(n, n).c,
+    name: n, hasRule: !!stash[n] || !!ruleFolders[n],
+    examples: exCount(n),
+    pending: pendCount.get(n.toLowerCase()) || 0,
     suggest: sug[n] || null,
   });
   const all = [...new Set([...choices, ...cands])].filter((x) => !x.includes('/') || true).sort((a, b) => a.localeCompare(b));

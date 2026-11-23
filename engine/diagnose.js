@@ -21,10 +21,10 @@ async function run(P, onProgress = () => {}) {
   else add({ level: 'danger', title: `${broken.length} AI model file${broken.length === 1 ? ' is' : 's are'} missing or too small`, evidence: broken.map((b) => `${b.dest}${b.sz < 0 ? ' (missing)' : ` (${b.sz} bytes)`}`).join(', '), fix: 'Download them again. Only the missing files are fetched.', repair: 'models' });
   // 2. the AI runtime and the graphics card
   step(1, 'Checking the AI runtime');
-  let ort = null; try { ort = require('onnxruntime-node'); add({ level: 'ok', title: 'The AI runtime (ONNX Runtime) loads', evidence: `onnxruntime-node ${(() => { try { return require('onnxruntime-node/package.json').version; } catch { return ''; } })()}` }); }
+  let ort = null; try { ort = await new Promise((res, rej) => { const w = new (require('worker_threads').Worker)("require('onnxruntime-node'); require('worker_threads').parentPort.postMessage(1)", { eval: true }); w.once('message', () => { w.terminate(); res(true); }); w.once('error', rej); }); add({ level: 'ok', title: 'The AI runtime (ONNX Runtime) loads', evidence: `onnxruntime-node ${(() => { try { return require('onnxruntime-node/package.json').version; } catch { return ''; } })()}` }); }
   catch (e) { add({ level: 'danger', title: 'The AI runtime does not load', evidence: e.message, fix: 'The program folder is damaged or incomplete. Download the latest release again and replace the App folder.' }); }
   step(2, 'Looking at the graphics cards');
-  const { listGpus } = require('./models/ort'); const gpus = listGpus();
+  const { listGpus } = require('./models/ort'); const gpus = await listGpus();
   const nv = await require('./gpu').sample();
   if (nv) add({ level: 'ok', title: `NVIDIA card found: ${nv.name}`, evidence: `driver ${nv.driver}, ${nv.memUsed} of ${nv.memTotal} MB in use, ${nv.load}% busy` });
   else if (gpus.length) add({ level: 'info', title: 'Graphics cards found', evidence: gpus.join(' · ') + '. nvidia-smi was not found, so load and memory can’t be shown.', fix: 'Nothing needed for DirectML. To see load and memory, install the latest NVIDIA driver.' });

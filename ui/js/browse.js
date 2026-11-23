@@ -1,15 +1,12 @@
 
 // =====================================================================================
-//  BROWSE: the picture lists (Review, Unsorted, Tags, Find Higher Quality, Source lookup)
+//  BROWSE: the picture lists (Review, Unsorted, Tags)
 // =====================================================================================
 const MODES = {
   review: { scope: 'new', realm: 'art', sidebar: 'folders', lanes: true, sort: 'score_desc', title: 'Art', sub: 'Art waiting to be sorted. Approving moves a file straight away into the folder shown; anything can be put back from Undo. Duplicates and possible sets wait in their own screens until you have dealt with them.' },
   real: { scope: 'new', realm: 'real', sidebar: 'folders', lanes: true, sort: 'score_desc', title: 'Real life', sub: 'Photos and videos of real people waiting to be sorted. Approving moves a file straight away; anything can be put back from Undo.' },
   unsorted: { scope: 'new', lane: 'unsorted', sidebar: null, sort: 'path', title: 'Unsorted', sub: 'Files the app could not place with enough confidence. Pick a folder for them, or send them on with “Approve”.' },
   tags: { scope: 'new', realmPick: true, sidebar: 'tags', lanes: true, sort: 'score_desc', title: 'Tags', sub: 'Pick tags on the left to find pictures by what is in them. Click a tag to include it, Alt+click to exclude it.' },
-  fhq: { scope: 'fhq', sidebar: null, moved: true, drag: true, sort: 'moved', title: 'Find Higher Quality', sub: 'Pictures you marked “Find higher quality” (Q) after they were moved. Drag one onto Google Images or Lens, or look it up on SauceNAO; when you find a better copy, “Found Higher Quality” sends this one to the Recycle Bin.' },
-  sauce_wait: { scope: 'sauce', sstate: 'waiting', sidebar: null, sort: 'sauce_asc' },
-  sauce_done: { scope: 'sauce', sstate: 'done', sidebar: null, drag: true, sort: 'hq' },
 };
 const LANES = [['', 'Everything'], ['art', 'Art'], ['photo', 'Photos'], ['video', 'Videos'], ['lowq', 'Low quality'], ['unsorted', 'Unsorted']];
 const SORTS = [
@@ -22,20 +19,20 @@ const SORTS = [
   ['Date modified', [['newest', 'Newest first'], ['oldest', 'Oldest first']]],
   ['Other', [['random', 'Random']]],
 ];
-const SORTS_FHQ = [['Moved here', [['moved', 'Most recent first'], ['moved_asc', 'Oldest first']]], ...SORTS.slice(1)];
-const SORTS_SAUCE = [['Bigger copy found', [['hq', 'Biggest improvement first'], ['hq_asc', 'Smallest improvement first']]], ['Looked up', [['sauce', 'Most recent first'], ['sauce_asc', 'Oldest first']]], ...SORTS.slice(1)];
 const SHOW_OPTS = [['name', 'File name'], ['dest', 'Folder it goes to'], ['rating', 'NSFW / Very label'], ['conf', 'Confidence % (corner)'], ['res', 'Resolution'], ['size', 'File size'], ['flags', 'Flags (low quality, set, dupe, video length…)'], ['why', 'Why it was chosen (cards)'], ['tags', 'Top tags (cards)']];
+// where a list's tags come from: '' = the tags the sorting uses; otherwise one tagger's own tags
+const tagSrcName = (k) => (k === '' ? 'Tags the sorting uses' : k === 'joytag' ? 'JoyTag' : (((S.tagger || {}).options || []).find((o) => o.key === k) || {}).short || k);
+function tagSources() { const cov = ((S.tagger || {}).coverage || {}).files || []; return ['', ...cov.map((c) => c.tagger).filter((k) => k).sort((a, b) => (a === 'joytag') - (b === 'joytag') || a.localeCompare(b))]; }
 
 const BS = {}; // one state per mode, kept while the app is open
 function bstate(mode) {
-  return BS[mode] || (BS[mode] = { mode, cfg: MODES[mode], lane: MODES[mode].lane || '', folder: '', state: '', sort: MODES[mode].sort, q: '', rating: '', kind: '', fhq: '', hq: '', items: [], total: 0, sel: new Set(), last: null, loading: false, seed: 1, realm: MODES[mode].realm || (MODES[mode].realmPick ? 'art' : ''), tinc: [], texc: [], tmode: 'all', tq: '', tmin: '', tags: [], gen: 0 });
+  return BS[mode] || (BS[mode] = { mode, cfg: MODES[mode], lane: MODES[mode].lane || '', folder: '', state: '', sort: MODES[mode].sort, q: '', rating: '', kind: '', fhq: '', hq: '', items: [], total: 0, sel: new Set(), last: null, loading: false, seed: 1, realm: MODES[mode].realm || (MODES[mode].realmPick ? 'art' : ''), tinc: [], texc: [], tmode: 'all', tq: '', tmin: '', tsrc: '', tags: [], gen: 0 });
 }
 let RV = bstate('review'); // the state that is on screen (the viewer and shortcuts work on this)
-const modeSorts = (RV) => (RV.cfg.scope === 'fhq' ? SORTS_FHQ : RV.cfg.scope === 'sauce' ? SORTS_SAUCE : SORTS);
+const modeSorts = () => SORTS;
 const effRating = (it) => it.userRating || it.rating || 'general';
 const relFolder = (p) => { const root = (S.settings.destinationRoot || '').replace(/\\/g, '/').replace(/\/+$/, ''); const q = String(p || '').replace(/\\/g, '/'); const rel = root && q.toLowerCase().startsWith(root.toLowerCase() + '/') ? q.slice(root.length + 1) : q; return rel.split('/').slice(0, -1).join('/'); };
 const destOf = (it) => (it.status === 'moved' ? relFolder(it.path) : it.userFolder || it.folder);
-const sauceLine = (it) => { const r = it.sauce && it.sauce.result; const t = r && r.top; const hq = r && r.hq; return it.sauce ? (it.sauce.state === 'done' ? (hq ? `⬆ ${hq.w}×${hq.h} (${hq.factor}× bigger, ${hq.engine}${hq.certain ? '' : ', possible'})` : t ? `${t.series || t.title || 'match'} · ${t.similarity}%` : 'no certain match') : it.sauce.state === 'error' ? 'lookup failed' : 'waiting for lookup') : ''; };
 
 const Browse = {
   mount(el, mode) {
@@ -53,7 +50,7 @@ const Browse = {
     g.addEventListener('dblclick', (e) => { const t = e.target.closest('.tile'); if (t) openViewer(+t.dataset.id); });
     g.addEventListener('mouseover', (e) => this.hover(e)); g.addEventListener('mouseout', (e) => this.unhover(e));
     g.addEventListener('dragstart', (e) => this.dragStart(e));
-    g.addEventListener('contextmenu', (e) => { const t = e.target.closest('.tile'); if (t && !RV.sel.has(+t.dataset.id)) { RV.sel.add(+t.dataset.id); this.paintSel(); } });
+    g.addEventListener('contextmenu', (e) => { const t = e.target.closest('.tile'); if (!t) return; e.preventDefault(); const id = +t.dataset.id; if (!RV.sel.has(id)) { if (!(e.ctrlKey || e.shiftKey)) RV.sel.clear(); RV.sel.add(id); RV.last = id; this.paintSel(); } ctxMenu(e.clientX, e.clientY, this.ids()); });
   },
 
   // ---------- toolbar / tabs ----------
@@ -63,11 +60,10 @@ const Browse = {
     const lay = PREFS.layout;
     $('#toolbar').innerHTML = `${cfg.sidebar ? `<button class="ghost line" id="sbtoggle" title="Show / hide the ${cfg.sidebar === 'tags' ? 'tag' : 'folder'} panel (H)">${cfg.sidebar === 'tags' ? 'Tags' : 'Folders'} ◧</button>` : ''}
       <input type="text" id="rq" placeholder="Search file names…  (Ctrl+F)" value="${esc(RV.q)}">
-      ${cfg.moved || cfg.scope === 'sauce' ? '' : `<select id="rstate" title="Status"><option value="">Any status</option><option value="pending">Needs review</option><option value="approved">Approved (waiting to move)</option><option value="rejected">Rejected</option></select>`}
+      ${cfg.moved ? '' : `<select id="rstate" title="Status"><option value="">Any status</option><option value="pending">Needs review</option><option value="approved">Approved (waiting to move)</option><option value="rejected">Rejected</option></select>`}
       ${cfg.moved ? '' : `<select id="rrate" title="NSFW / Very"><option value="">Any rating</option><option value="general">General</option><option value="nsfw">NSFW</option><option value="very">Very</option></select>`}
       <select id="rkind" title="Pictures or videos"><option value="">Pictures + videos</option><option value="image">Pictures only</option><option value="video">Videos only</option></select>
-      ${cfg.scope === 'sauce' && cfg.sstate === 'done' ? `<label class="chk" title="Only pictures where a clearly bigger copy was found"><input type="checkbox" id="rhq" ${RV.hq ? 'checked' : ''}> Bigger copy found</label>` : ''}
-      ${cfg.moved || cfg.scope === 'sauce' ? '' : `<label class="chk" title="Only the ones marked Find higher quality"><input type="checkbox" id="rfhq" ${RV.fhq ? 'checked' : ''}> Find HQ only</label>`}
+      ${cfg.moved ? '' : `<label class="chk" title="Only the ones marked Find higher quality"><input type="checkbox" id="rfhq" ${RV.fhq ? 'checked' : ''}> Find HQ only</label>`}
       <span class="grow"></span><button class="ghost" id="rclear">Clear filters</button>`;
     $('#sum').innerHTML = `${cfg.lanes ? `<div class="tabs" id="tabs">${LANES.map(([k, l]) => `<span class="tab ${RV.lane === k ? 'on' : ''}" data-lane="${k}">${l}</span>`).join('')}</div>` : ''}
       <span class="small faint" id="rcount"></span><span class="grow"></span>
@@ -82,10 +78,9 @@ const Browse = {
     $('#sbtoggle') && ($('#sbtoggle').onclick = () => document.body.classList.toggle('nosb'));
     let tm; $('#rq').oninput = (e) => { clearTimeout(tm); tm = setTimeout(() => { RV.q = e.target.value; this.refresh(); }, 300); };
     for (const [id, k] of [['rstate', 'state'], ['rrate', 'rating'], ['rkind', 'kind'], ['rsort', 'sort']]) { const n = $('#' + id); if (n) n.onchange = (e) => { RV[k] = e.target.value; if (k === 'sort' && e.target.value === 'random') RV.seed = Math.floor(Math.random() * 1e6); this.refresh(); }; }
-    $('#rhq') && ($('#rhq').onchange = (e) => { RV.hq = e.target.checked ? '1' : ''; this.refresh(); });
     $('#rfhq') && ($('#rfhq').onchange = (e) => { RV.fhq = e.target.checked ? '1' : ''; this.refresh(); });
     $('#rshuf').onclick = () => { RV.sort = 'random'; RV.seed = Math.floor(Math.random() * 1e6); $('#rsort').value = 'random'; this.refresh(); };
-    $('#rclear').onclick = () => { Object.assign(RV, { lane: cfg.lane || '', folder: '', state: '', rating: '', kind: '', fhq: '', hq: '', q: '', sort: cfg.sort, tinc: [], texc: [], tq: '' }); this.drawToolbar(); this.drawSidebar(); this.load(true); };
+    $('#rclear').onclick = () => { Object.assign(RV, { lane: cfg.lane || '', folder: '', state: '', rating: '', kind: '', fhq: '', q: '', sort: cfg.sort, tinc: [], texc: [], tq: '' }); this.drawToolbar(); this.drawSidebar(); this.load(true); };
     $$('#laysw [data-lay]').forEach((b) => (b.onclick = () => { PREFS.layout = b.dataset.lay; savePrefs(); $$('#laysw [data-lay]').forEach((x) => x.classList.toggle('on', x === b)); this.applyGridPrefs(); this.load(true); }));
     $('#rsize').oninput = (e) => this.setSize(+e.target.value);
     $('#rcols').oninput = (e) => this.setCols(+e.target.value);
@@ -143,9 +138,11 @@ const Browse = {
     } else {
       sb.innerHTML = `<div class="shead"><b>Tags</b><span class="grow"></span><button class="ghost sm" id="tclear">Clear</button></div>
         <div class="tagctl"><input type="text" id="tq" placeholder="Search tags…" value="${esc(RV.tq)}">
-        ${RV.cfg.realmPick ? '<div class="row" style="margin:6px 0"><select id="trealm" title="Tags are kept separately for art and for real photos / videos"><option value="art">Art tags</option><option value="real">Real photo / video tags</option><option value="">Both</option></select></div>' : ''}<div class="row" style="margin:6px 0"><select id="tmode" title="How the picked tags combine"><option value="all">Has ALL picked tags</option><option value="any">Has ANY picked tag</option></select></div>
-        <label class="rng" title="A tag counts for a picture only when the tagger is at least this sure"><span>Min confidence</span><input type="number" id="tmin" min="0.05" max="0.99" step="0.05" style="width:70px" value="${RV.tmin !== '' ? RV.tmin : ((S.settings.tagger || {}).minConfidence ?? 0.35)}"></label>
+        <div class="row" style="margin:6px 0"><select id="tsrc" title="Every tagger’s tags are kept separately. Pick whose tags to list and search.">${tagSources().map((k) => `<option value="${esc(k)}">${esc(tagSrcName(k))}</option>`).join('')}</select></div>
+        ${RV.cfg.realmPick ? '<div class="row" style="margin:6px 0"><select id="trealm" title="Art and real photos / videos are listed separately"><option value="art">Art</option><option value="real">Real photos / videos</option><option value="">Both</option></select></div>' : ''}<div class="row" style="margin:6px 0"><select id="tmode" title="How the picked tags combine"><option value="all">Has ALL picked tags</option><option value="any">Has ANY picked tag</option></select></div>
+        <label class="rng" title="A tag counts for a picture only when the tagger is at least this sure"><span>Min confidence</span><input type="number" id="tmin" min="0.15" max="0.99" step="0.05" style="width:70px" value="${RV.tmin !== '' ? RV.tmin : ((S.settings.tagger || {}).minConfidence ?? 0.35)}"></label>
         <div id="tchips" class="tchips"></div></div><div class="flist" id="tlist"></div><div class="small muted" style="padding:6px">Click a tag to include it. Alt-click or “−” to exclude it.</div>`;
+      $('#tsrc').value = RV.tsrc || ''; $('#tsrc').onchange = (e) => { RV.tsrc = e.target.value; RV.tinc = []; RV.texc = []; this.refresh(); };
       $('#tmode').value = RV.tmode; if ($('#trealm')) { $('#trealm').value = RV.realm; $('#trealm').onchange = (e) => { RV.realm = e.target.value; RV.tinc = []; RV.texc = []; this.refresh(); }; }
       let tm; $('#tq').oninput = (e) => { clearTimeout(tm); tm = setTimeout(() => { RV.tq = e.target.value.trim().toLowerCase(); this.drawTags(); }, 250); };
       $('#tmode').onchange = (e) => { RV.tmode = e.target.value; this.refresh(); };
@@ -179,7 +176,7 @@ const Browse = {
   // ---------- data ----------
   query(offset, extra = {}) {
     const c = RV.cfg;
-    const o = { scope: c.scope, realm: RV.realm || '', sstate: c.sstate || '', lane: RV.lane, folder: RV.folder, state: RV.state, sort: RV.sort, seed: RV.seed, q: RV.q, rating: RV.rating, kind: RV.kind, fhq: RV.fhq, hq: RV.hq, tinc: RV.tinc.join('|'), texc: RV.texc.join('|'), tmode: RV.tmode, tmin: RV.tmin, limit: 120, offset, withtags: (PREFS.show || {}).tags === false ? 0 : 1, ...extra };
+    const o = { scope: c.scope, realm: RV.realm || '', tsrc: RV.tsrc || '', lane: RV.lane, folder: RV.folder, state: RV.state, sort: RV.sort, seed: RV.seed, q: RV.q, rating: RV.rating, kind: RV.kind, fhq: RV.fhq, tinc: RV.tinc.join('|'), texc: RV.texc.join('|'), tmode: RV.tmode, tmin: RV.tmin, limit: 120, offset, withtags: (PREFS.show || {}).tags === false ? 0 : 1, ...extra };
     return new URLSearchParams(o).toString();
   },
   async load(reset, keep) {
@@ -212,8 +209,6 @@ const Browse = {
     const s = RV.cfg.scope;
     if (RV.realm && (it.realness || 'art') !== RV.realm && s === 'new') return false;   // moved to the other side (P)
     if (s === 'new') return it.status === 'new';
-    if (s === 'fhq') return it.status === 'moved' && relFolder(it.path).toLowerCase().split('/').includes(String(S.settings.fhqFolder || 'Find Higher Quality').toLowerCase());
-    if (s === 'sauce') return !!it.sauce && (RV.cfg.sstate === 'done' ? it.sauce.state === 'done' : it.sauce.state !== 'done');
     return true;
   },
   removeIds(ids) {
@@ -229,9 +224,9 @@ const Browse = {
   tile(it) {
     const rate = effRating(it); const sh = PREFS.show || {}; const moved = it.status === 'moved';
     const flags = `${it.fhq ? '<span class="chip fhq">Find HQ</span>' : ''}${it.lane === 'lowq' ? '<span class="chip warn">low quality</span>' : ''}${it.lane === 'dupe' ? '<span class="chip warn">dupe</span>' : ''}${it.lane === 'set' ? '<span class="chip">set</span>' : ''}${it.kind === 'video' ? `<span class="chip">${esc(dur(it.duration) || 'video')}</span>` : ''}${it.state === 'approved' ? '<span class="chip ok">approved</span>' : it.state === 'rejected' ? '<span class="chip bad">rejected</span>' : ''}`;
-    const dest = destOf(it); const sl = sauceLine(it);
+    const dest = destOf(it);
     const tags = (it.tags || []).map(([n, p, c]) => `<span class="tg c${c || 0} ${it.tmin != null && p < it.tmin ? 'dim' : ''}" data-tag="${esc(n)}" title="${Math.round(p * 100)}% sure${RV.cfg.sidebar === 'tags' ? ' — click to add to your selection, Alt+click to exclude' : ''}">${esc(n)} <i>${Math.round(p * 100)}</i></span>`).join('');
-    const info = `<div class="dest" title="${esc(it.reason || '')}">${esc(dest || '— choose —')}</div><div class="fn" title="${esc(it.path)}">${esc(it.name)}</div><div class="dim"><span class="res">${it.w ? `${it.w}×${it.h}` : ''}</span><span class="sz">${it.size ? fmtSize(it.size) : ''}</span></div>${sl ? `<div class="sl">${esc(sl)}</div>` : ''}<div class="why">${esc(it.reason || '')}${it.series ? ` · series: ${esc(it.series)}` : ''}</div>${tags ? `<div class="tags">${tags}</div>` : ''}`;
+    const info = `<div class="dest" title="${esc(it.reason || '')}">${esc(dest || '— choose —')}</div><div class="fn" title="${esc(it.path)}">${esc(it.name)}</div><div class="dim"><span class="res">${it.w ? `${it.w}×${it.h}` : ''}</span><span class="sz">${it.size ? fmtSize(it.size) : ''}</span></div><div class="why">${esc(it.reason || '')}${it.series ? ` · series: ${esc(it.series)}` : ''}</div>${tags ? `<div class="tags">${tags}</div>` : ''}`;
     const ar = it.w && it.h ? `${it.w}/${it.h}` : '1/1';
     if (PREFS.layout === 'table') return `<div class="tile ${RV.sel.has(it.id) ? 'sel' : ''} ${it.state}" data-id="${it.id}" data-kind="${it.kind}" ${RV.cfg.drag ? 'draggable="true"' : ''}><span class="tck"></span><div class="img"><img loading="lazy" draggable="false" src="${thumb(it.id)}" alt=""></div>
       <span class="c" title="${esc(it.path)}">${esc(it.name)}${it.kind === 'video' ? ` <span class="faint">${esc(dur(it.duration) || 'video')}</span>` : ''}</span><span class="c f" title="${esc(it.reason || '')}">${esc(dest || '— choose —')}${it.fhq ? ' <span class="chip fhq">Find HQ</span>' : ''}${it.lane === 'lowq' ? ' <span class="chip warn">low quality</span>' : ''}</span>
@@ -258,7 +253,7 @@ const Browse = {
     return `<div class="thead"><span></span><span></span>${col('Name', 'path', 'path_desc')}${col(moved ? 'Folder' : 'Goes to', moved ? '' : 'folder', 'folder_desc')}${col('Confidence', moved ? '' : 'score_desc', 'score_asc')}${col('Rating', moved ? '' : 'rating', 'rating_asc')}${col('Resolution', 'res', 'res_asc')}${col('Size', 'size', 'size_asc')}</div>`;
   },
   wireThead() { $$('#grid .thead [data-sa]').forEach((h) => (h.onclick = () => { RV.sort = RV.sort === h.dataset.sa ? h.dataset.sd : h.dataset.sa; const so = $('#rsort'); if (so) so.value = RV.sort; this.refresh(); })); },
-  emptyText() { const m = RV.cfg; return m.scope === 'fhq' ? 'Nothing in a Find Higher Quality folder yet.<br>Press Q on pictures and approve them, or use “Re-scan folders”.' : m.scope === 'sauce' ? (m.sstate === 'done' ? 'No lookup results yet.' : 'Nothing is waiting for a lookup.<br>Select pictures anywhere and press “Send to SauceNAO”.') : 'No files match.'; },
+  emptyText() { return 'No files match.'; },
   refreshTile(it) { const t = $(`.tile[data-id="${it.id}"]`); if (t) { const n = document.createElement('div'); n.innerHTML = this.tile(it); t.replaceWith(n.firstElementChild); } },
   paintSel() { $$('#grid .tile').forEach((x) => x.classList.toggle('sel', RV.sel.has(+x.dataset.id))); this.bulk(); },
 

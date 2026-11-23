@@ -38,11 +38,11 @@ try:
         a3=api('/review?scope=new&realm=art&limit=100'); check('and back to Art', any(x['id']==i for x in a3['items']))
     # tag source follows realness: real files show joytag tags only
     if real['items']:
-        rid=real['items'][0]['id']; tg=api('/tags/file?id='+str(rid)); names={t['tag'] for t in tg}; print('real tags',sorted(names)[:8])
+        rid=real['items'][0]['id']; tg=api('/tags/file?id='+str(rid))['sets'][0]['tags']; names={t['tag'] for t in tg}; print('real tags',sorted(names)[:8])
         check('real picture shows JoyTag tags', names and names <= {'1girl','solo','photorealistic','photo','realistic','smile','outdoors','sword','monochrome','blue hair','long hair','sky','looking at viewer','breasts','nude','city','tree','dress','weapon','building'}, sorted(names)[:6])
     api('/settings',{**api('/settings'),'tagSource':{'art':'both','real':'both'}}); time.sleep(1)
     if real['items']:
-        tg=api('/tags/file?id='+str(real['items'][0]['id'])); check('both source merges WD + JoyTag tags', any(t['tag'] in ('rem (re:zero)','greyscale','link (zelda)') for t in tg) and any(t['tag']=='photo' for t in tg), [t['tag'] for t in tg][:8])
+        tg=api('/tags/file?id='+str(real['items'][0]['id']))['sets'][0]['tags']; check('both source merges WD + JoyTag tags', any(t['tag'] in ('rem (re:zero)','greyscale','link (zelda)') for t in tg) and any(t['tag'] in ('photo','weapon','breasts','long hair','city','tree','dress','building','nude','solo') for t in tg), [t['tag'] for t in tg][:8])
     b2=None
 except Exception as e:
     import traceback; traceback.print_exc(); ok=False

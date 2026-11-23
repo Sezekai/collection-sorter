@@ -5,7 +5,7 @@ Review-first sorter for a large art, photo and video collection. It reads every 
 ## For users
 
 1. Download `CollectionSorter-v<version>-win-x64.zip` from the latest release and unzip it into, for example, `E:\Pictures`. The program is `E:\Pictures\Collection Sorter\App\Collection Sorter.exe`. No install needed.
-2. On **Setup** (its sections are listed on the left): add your source folders, set the destination folder, download the models once (about 1.8 GB), and add **Scan & tag files** to the queue.
+2. On **Setup** (its sections are listed on the left): add your source folders, set the destination folder, download the models once (about 1.3 GB with the default Haruka tagger), and add **Scan & tag files** to the queue.
 3. Review on the Review screens. **Approve** (A) moves a file at once; **Reject** (R) keeps it where it is. Ctrl+Z undoes the last move, and **Undo** puts back anything. Press **K** for every shortcut.
 
 `READ ME FIRST.txt` in the zip has the same steps, plus where everything is stored.
@@ -18,7 +18,11 @@ Review-first sorter for a large art, photo and video collection. It reads every 
 - **Review views:** Grid, Masonry, Cards and List (sortable columns). The viewer has no overlays: the panel on the right holds the details, folder, rating and Approve/Reject.
 - **Look:** **Sizes** (a preset, an overall size, and separate sizes for the text, screen titles, menu text and icons, the logo, other icons, buttons and fields, and rows; Ctrl + = / − / 0 anywhere), themes (save, rename, duplicate, export, import), background and accent colours, fonts (bundled, system or your own), corners, buttons and outlines. Sizes stay the same whichever theme you pick.
 - **Settings:** every option, **Storage** (each location with its size: open, move, clear), **GPU** (Auto, GPU, CPU), **Diagnose and repair**, and resets.
-- **Log (L):** opens a drawer with the live log; it opens itself on an error.
+- **Log (Ctrl+L):** opens a drawer with the live log; it opens itself on an error.
+- **Taggers:** Haruka (default), PixAI v1.0, Camie v2 and three WD v3 models. Each tagger's tags are kept separately, so tagging again with another one loses nothing. Setup → AI models chooses the one the sorting uses and downloads the others; **Tag again** (in the bar, the right-click menu and the viewer) re-tags all files, the selection or one file. The Tags screen and the viewer show every tagger's tags (a chooser and tabs). Real-life photos and videos are sorted with JoyTag's tags.
+- **Look Up (L)** moves files to the Look Up folder (`…\Sort\Look Up`, with NSFW / Very, Videos, and Real\Images / Real\Videos subfolders). **Find HQ (Q)** marks a file so that, once approved, it goes to `…\Sort\Find Higher Quality\<its folder>\<NSFW / Very>`. Both folders are set in Setup → Destination.
+- **Delete** (key or button) sends files to the Recycle Bin through Windows; it never deletes permanently, and shows an error if the Recycle Bin can't take them.
+- **G / N / V** set General, NSFW or Very (green, orange, red).
 
 ## Changing folders (for example from test files to the real ones)
 

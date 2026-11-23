@@ -45,10 +45,13 @@ function ensureDir(d) { fs.mkdirSync(d, { recursive: true }); }
 const EventEmitter = require('events');
 const logBus = new EventEmitter(); logBus.setMaxListeners(50);
 const logRing = [];
+// a closed pipe (the shell went away) must not crash the engine
+// (EPIPE means the app that started us is gone: stop rather than run on unseen; the database and the move journal are safe to stop at any point)
+for (const st of [process.stdout, process.stderr]) st.on('error', (e) => { if (e.code !== 'EPIPE') throw e; if (!process.env.CS_KEEP_ON_EPIPE) process.exit(0); });
 function logAt(level, a) {
   const text = a.map((x) => (x instanceof Error ? x.stack || x.message : typeof x === 'string' ? x : JSON.stringify(x))).join(' ');
   const line = { ts: Date.now(), level, text }; logRing.push(line); if (logRing.length > 1000) logRing.shift();
-  (level === 'e' ? console.error : console.log)(new Date().toISOString().slice(11, 19), level === 'e' ? 'ERROR' : level === 'w' ? 'WARN' : '', text);
+  try { (level === 'e' ? console.error : console.log)(new Date().toISOString().slice(11, 19), level === 'e' ? 'ERROR' : level === 'w' ? 'WARN' : '', text); } catch { /* the shell closed our output (EPIPE): the drawer still gets the line */ }
   logBus.emit('line', line);
 }
 const log = (...a) => logAt('i', a);

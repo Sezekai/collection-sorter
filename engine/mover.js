@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const db = require('./db');
-const { destDir, findSub } = require('./catalog');
+const { destDir } = require('./catalog');
 const { fingerprint } = require('./hashing');
 const { ensureDir, pkey } = require('./util');
 
@@ -34,8 +34,6 @@ async function safeMove(src, dst) {
   return { copied: true };
 }
 
-// "Find Higher Quality" subfolder inside a destination directory (e.g. Anime/NSFW/Find Higher Quality)
-function fhqIn(dir, settings) { const name = settings.fhqFolder || 'Find Higher Quality'; return path.join(dir, findSub(dir, name) || name); }
 const ratingOfPath = (p) => { const s = p.replace(/\\/g, '/').toLowerCase(); return /\/very(\/|$)/.test(s) ? 'very' : /\/nsfw(\/|$)/.test(s) ? 'nsfw' : 'general'; };
 
 // Move files that were already moved (for example out of a Find Higher Quality folder) to another destination folder. Journaled and undoable.
@@ -86,10 +84,10 @@ async function applyApproved(settings, { ids = null, note = '' } = {}, onProgres
   let moved = 0, failed = 0, n = 0;
   for (const r of rows) {
     const { folder, rating } = effective(r, settings);
-    let dir = destDir(root, folder, rating);
-    if (r.fhq) dir = fhqIn(dir, settings);
+    let dir = null;
     let jid = null;
     try {
+      dir = r.fhq ? require('./lookup').fhqDir(settings, folder, rating) : destDir(root, folder, rating);   // Find higher quality: the Find Higher Quality folder, in the same folder layout
       if (!fs.existsSync(r.path)) throw new Error('file no longer exists');
       ensureDir(dir);
       const dst = uniquePath(dir, path.basename(r.path));
@@ -102,7 +100,7 @@ async function applyApproved(settings, { ids = null, note = '' } = {}, onProgres
     } catch (e) {
       failed++;
       if (jid) jDone.run('failed', String(e.message).slice(0, 300), null, jid);
-      else jIns.run(batch, r.file_id, r.path, null, r.size, null, Date.now(), 'failed');
+      else { const j2 = Number(jIns.run(batch, r.file_id, r.path, null, r.size, null, Date.now(), 'failed').lastInsertRowid); d.prepare('update journal set err=? where id=?').run(String(e.message).slice(0, 300), j2); }
     }
     if (onProgress && ++n % 20 === 0) onProgress({ phase: 'move', done: n, total: rows.length, moved, failed });
   }
@@ -156,4 +154,4 @@ function history(limit = 200) {
     (select count(*) from journal j where j.batch_id=b.id and j.status='failed') failed from batches b order by b.id desc limit ?`).all(limit);
 }
 
-module.exports = { relocate, fhqIn, ratingOfPath, applyApproved, recover, undoBatch, undoFile, undoFolder, history, uniquePath, safeMove };
+module.exports = { relocate, ratingOfPath, applyApproved, recover, undoBatch, undoFile, undoFolder, history, uniquePath, safeMove };

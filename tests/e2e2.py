@@ -41,7 +41,7 @@ try:
     r = api('/reset', {'what': 'decisions'}); c = api('/state')['counts']; check('reset decisions', api('/review?state=rejected&limit=1')['total'] == 0 and c['pending'] == pend0, (r, c))
     api('/suggestion', {'filter': {}, 'action': 'reject'}); api('/suggestion', {'filter': {}, 'action': 'clearChoice'})
     check('clearChoice', api('/review?state=rejected&limit=1')['total'] == 0)
-    for w in ['analysis', 'examples', 'examplesLearning', 'series', 'sauce', 'thumbs', 'rules']:
+    for w in ['analysis', 'examples', 'examplesLearning', 'series', 'thumbs', 'rules']:
         r = api('/reset', {'what': w}); check('reset ' + w, 'message' in r, r)
     c = api('/state')['counts']; check('analysis reset marks unanalyzed', c['analyzed'] == 0, c)
     api('/run', {}); time.sleep(1); wait(); check('re-read after reset', api('/state')['counts']['analyzed'] == 23)
@@ -63,11 +63,6 @@ try:
         pg.hover('[data-tipid="quality.minBitsPerPixel"] label'); pg.wait_for_timeout(400)
         tip = pg.inner_text('#tip'); check('tooltip explains bits/pixel', 'pixel' in tip.lower() and 'Good value' in tip, tip[:150].replace('\n', ' | '))
         pg.screenshot(path=f'{ROOT}/shot_tip.png')
-        # sauce key readable
-        pg.click('[data-sec="sauce"]'); pg.wait_for_timeout(600)
-        t = pg.get_attribute('[data-path="saucenao.apiKey"]', 'type'); check('sauce key is plain text', t == 'text', t)
-        pg.fill('[data-path="saucenao.apiKey"]', 'abc123KEY'); pg.press('[data-path="saucenao.apiKey"]', 'Tab'); pg.wait_for_timeout(600)
-        check('sauce key saved', api('/state')['settings']['saucenao']['apiKey'] == 'abc123KEY')
         # per-field reset
         pg.click('[data-sec="quality"]'); pg.wait_for_timeout(600)
         pg.fill('[data-path="quality.minShortSide"]', '999'); pg.press('[data-path="quality.minShortSide"]', 'Tab'); pg.wait_for_timeout(500)
@@ -109,7 +104,7 @@ try:
         pg.keyboard.press('a'); pg.wait_for_timeout(600); check('viewer A approves and moves', api('/state')['counts']['moved'] == 1)
         pg.screenshot(path=f'{ROOT}/shot_viewer2.png'); pg.keyboard.press('Escape')
         # unmapped / sets / dupes / rules render
-        for route in ['sets', 'dupes', 'unmapped', 'rules', 'sauce', 'undo']:
+        for route in ['sets', 'dupes', 'unmapped', 'rules', 'undo']:
             pg.goto(f'{base}/?t=tok123#{route}'); pg.wait_for_timeout(800)
         pg.goto(f'{base}/?t=tok123#dupes'); pg.wait_for_timeout(800)
         if pg.locator('[data-rs]').count(): pg.locator('[data-rs]').first.click(); pg.wait_for_timeout(900)

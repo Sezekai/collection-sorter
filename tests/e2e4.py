@@ -19,11 +19,11 @@ ok=True
 def check(n,c,i=''):
     global ok; ok&=bool(c); print('PASS' if c else 'FAIL',n,i); sys.stdout.flush()
 try:
-    api('/settings',{'destinationRoot':ROOT+'/dest','sources':[{'path':ROOT+'/src','excludes':[]}],'models':{'dir':'/tmp/dummy'},'tagger':{'device':'cpu','model':'swinv2'}})
+    api('/settings',{'destinationRoot':ROOT+'/dest','sources':[{'path':ROOT+'/src','excludes':[]}],'models':{'dir':'/tmp/dummy'},'tagger':{'device':'cpu','model':'swinv2'},'lookupRoot':ROOT+'/Sort/Look Up','fhqRoot':ROOT+'/Sort/Find Higher Quality'})
     api('/run',{}); wait(); c=api('/state')['counts']; print(c)
     with sync_playwright() as pw:
         b=pw.chromium.launch(); pg=b.new_page(viewport={'width':2000,'height':1100}); errs=[]
-        pg.on('pageerror',lambda e:errs.append(str(e))); pg.on('console',lambda m: errs.append(m.text) if m.type=='error' else None)
+        pg.on('pageerror',lambda e:errs.append(str(e)+' @ '+(e.stack or '')[:300])); pg.on('console',lambda m: errs.append(m.text) if m.type=='error' else None)
         pg.goto(f'{base}/?t=t#review'); pg.wait_for_timeout(1500)
         n=pg.locator('#grid .tile').count(); check('tiles shown', n>5, n)
         pg.screenshot(path=ROOT+'/grid.png')
@@ -94,9 +94,9 @@ try:
         pg.keyboard.press('t'); pg.wait_for_timeout(300); check('T closes viewer', pg.locator('#viewer.hidden').count()==1)
         check('2 selected carried to the list', pg.locator('#grid .tile.sel').count()==2, pg.locator('#grid .tile.sel').count())
         # rating select keeps selection and shows current
-        pg.select_option('#b_rate','nsfw'); pg.wait_for_timeout(800)
+        pg.click('#b_rate [data-r="nsfw"]'); pg.wait_for_timeout(800)
         check('rating change keeps selection', pg.locator('#grid .tile.sel').count()==2)
-        check('rating select shows value', pg.eval_on_selector('#b_rate','e=>e.value')=='nsfw')
+        check('rating buttons show value', pg.locator('#b_rate [data-r="nsfw"].on').count()==1)
         # Q toggles FHQ, approve moves
         ids=[int(x) for x in pg.eval_on_selector_all('#grid .tile.sel','els=>els.map(e=>e.dataset.id)')]
         pg.keyboard.press('q'); pg.wait_for_timeout(700)
@@ -105,7 +105,7 @@ try:
             it=api('/review?scope=any&ids=%d'%i)['items'][0]; print(it['status'], it['path'])
         moved=[api('/review?scope=any&ids=%d'%i)['items'][0] for i in ids]
         check('approve moved them', all(m['status']=='moved' for m in moved))
-        check('FHQ + NSFW path', all('find higher quality' in m['path'].lower() for m in moved) and '/nsfw/find higher quality/' in moved[0]['path'].lower(), [m['path'] for m in moved])
+        check('FHQ goes to <fhqRoot>/<folder>/NSFW', all(m['path'].replace('\\','/').startswith(ROOT+'/Sort/Find Higher Quality/') and '/NSFW/' in m['path'] for m in moved), [m['path'] for m in moved])
         check('moved leave review', all(pg.locator(f'#grid .tile[data-id="{i}"]').count()==0 for i in ids))
         # videos: hover preview + viewer controls + volume
         pg.goto(f'{base}/?t=t#real'); pg.wait_for_timeout(1500)
@@ -121,7 +121,7 @@ try:
         v0=pg.evaluate('PREFS.volume'); pg.keyboard.press('ArrowUp'); pg.wait_for_timeout(200); v1=pg.evaluate('PREFS.volume'); check('up arrow +3%', abs(v1-v0-0.03)<0.001, (v0,v1))
         pg.keyboard.press('ArrowDown'); pg.keyboard.press('ArrowDown'); v2=pg.evaluate('PREFS.volume'); check('down arrow -3%', abs(v1-v2-0.06)<0.001)
         pg.keyboard.press('u'); check('U mutes', pg.evaluate('PREFS.muted')==True); pg.keyboard.press('u'); check('U restores', pg.evaluate('PREFS.muted')==False and abs(pg.evaluate('PREFS.volume')-v2)<0.001)
-        check('video controls sit in the side panel, not over the video', pg.locator('#vside .vcontrols').count()==1 and pg.locator('#stage .vcontrols, #stage .vctl').count()==0)
+        check('video controls sit at the bottom of the video', pg.locator('#stage #vov').count()==1)
         time.sleep(0.6); ui=api('/ui'); check('volume saved on engine', abs(ui.get('volume',-1)-v2)<0.001, ui.get('volume'))
         pg.keyboard.press('t'); pg.wait_for_timeout(900)
         # move via the folder box, SauceNAO send / waiting list
@@ -130,24 +130,18 @@ try:
         pg.fill('#b_folder','Zelda'); pg.keyboard.press('Enter'); pg.wait_for_timeout(2000)
         m=api('/review?scope=any&ids=%d'%i0)['items'][0]; check('folder box moves at once', m['status']=='moved' and '/dest/Zelda/' in m['path'].replace('\\','/'), m['path'])
         check('moved item left the list', pg.locator(f'#grid .tile[data-id="{i0}"]').count()==0)
-        t1=pg.locator('#grid .tile').nth(min(9, pg.locator('#grid .tile').count()-1)); i1=int(t1.get_attribute('data-id')); t1.click(); pg.click('#b_sn'); pg.wait_for_timeout(800)
-        st=api('/sauce/stats'); check('sent to SauceNAO queue', st['queued']>=1, st)
-        pg.goto(f'{base}/?t=t#sauce'); pg.wait_for_timeout(800); pg.click('#stabs button[data-t="waiting"]'); pg.wait_for_timeout(1200)
-        check('waiting list shows only sent pictures', pg.locator('#grid .tile').count()==st['queued'], pg.locator('#grid .tile').count())
-        pg.locator('#grid .tile').first.click(); pg.click('#b_dq'); pg.wait_for_timeout(800); check('dequeue removes from waiting', pg.locator('#grid .tile').count()==st['queued']-1)
+        t1=pg.locator('#grid .tile').nth(min(9, pg.locator('#grid .tile').count()-1)); i1=int(t1.get_attribute('data-id')); t1.click(); pg.click('#b_look'); pg.wait_for_timeout(1500)
+        m=api('/review?scope=any&ids=%d'%i1)['items'][0]; check('Look Up button moves it to the Look Up folder', m['path'].replace('\\','/').startswith(ROOT+'/Sort/Look Up/'), m['path'])
         # sets: reject one, tells where pictures go
         pg.goto(f'{base}/?t=t#sets'); pg.wait_for_timeout(1200); nsets=pg.locator('.setcard').count()
         if nsets:
             pg.locator('[data-a="reject"]').first.click(); pg.wait_for_timeout(1500); check('rejected set leaves section', pg.locator('.setcard').count()==nsets-1)
             check('toast says where they went', 'going to' in pg.inner_text('#toasts'), pg.inner_text('#toasts'))
-        # FHQ view
-        pg.goto(f'{base}/?t=t#fhq'); pg.wait_for_timeout(1800); check('FHQ shows moved', pg.locator('#grid .tile').count()==len(ids), pg.locator('#grid .tile').count()); pg.screenshot(path=ROOT+'/fhq.png')
         # tags view
         pg.goto(f'{base}/?t=t#tags'); pg.wait_for_timeout(1500); check('tags list', pg.locator('#tlist .fitem').count()>0, pg.locator('#tlist .fitem').count()); pg.screenshot(path=ROOT+'/tags.png')
         if pg.locator('#tlist .fitem').count():
             pg.locator('#tlist .fitem').first.click(); pg.wait_for_timeout(700); check('tag include chip', pg.locator('#tchips .tchip.inc').count()==1)
         # sauce view + undo + sets
-        pg.goto(f'{base}/?t=t#sauce'); pg.wait_for_timeout(1200); pg.screenshot(path=ROOT+'/sauce.png')
         pg.goto(f'{base}/?t=t#undo'); pg.wait_for_timeout(1200); pg.screenshot(path=ROOT+'/undo.png'); check('undo shows singles/batches', pg.locator('.single, table tr').count()>1)
         pg.goto(f'{base}/?t=t#sets'); pg.wait_for_timeout(1000); pg.goto(f'{base}/?t=t#unsorted'); pg.wait_for_timeout(1000)
         pg.goto(f'{base}/?t=t#setup'); pg.wait_for_timeout(1200); pg.screenshot(path=ROOT+'/setup.png')

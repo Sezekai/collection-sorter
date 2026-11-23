@@ -79,38 +79,6 @@ views.unmapped = {
   },
 };
 
-// ---------- SAUCE ----------
-// Only pictures you have sent to SauceNAO are shown here. Two lists: waiting, and results.
-views.sauce = {
-  tab: 'done', soft: false,
-  async render(el) {
-    el.style.padding = '0'; el.className = 'browse';
-    document.body.classList.add('isbrowse');
-    el.innerHTML = `<div class="saucehead"><h1 style="margin:0">Source lookup</h1><div class="seg" id="stabs"><button data-t="done">Results</button><button data-t="waiting">Waiting</button><button data-t="log">Log</button></div><span class="grow"></span><span id="sstat" class="small muted"></span>
-      <button class="ghost sm" id="s_run">Start</button><button class="ghost sm" id="s_pause">Pause</button><button class="ghost sm" id="s_cancel">Stop</button></div><div id="sbrowse" class="sbrowse"></div>`;
-    $$('#stabs button').forEach((b) => { b.classList.toggle('on', b.dataset.t === this.tab); b.onclick = () => { this.tab = b.dataset.t; this.render(el); }; });
-    $('#s_run').onclick = async () => { try { const r = await api('/sauce/run', {}); toast(r.started ? 'Lookups started' : 'Nothing to do, or no lookup site is turned on (Setup screen).', !r.started); } catch (e) { toast(e.message, true); } this.status(); };
-    $('#s_pause').onclick = async () => { const st = S.sauce || {}; await api('/sauce/control', { action: st.paused ? 'resume' : 'pause' }); this.status(); };
-    $('#s_cancel').onclick = async () => { await api('/sauce/control', { action: 'cancel' }); toast('Stopping after the current picture'); };
-    await loadChoices(); this.status();
-    if (this.tab === 'log') return this.drawLog();
-    Browse.mount($('#sbrowse'), this.tab === 'done' ? 'sauce_done' : 'sauce_wait');
-  },
-  async drawLog() {
-    const host = $('#sbrowse'); host.innerHTML = '<div class="empty">Loading…</div>';
-    const { rows } = await api('/lookup-log?limit=1000');
-    host.innerHTML = `<div style="padding:14px 22px;overflow:auto;height:100%"><p class="small muted">Every picture that was looked up, what was found, and what happened to it afterwards. Pictures sent to the Recycle Bin or to the manual folder are noted here too.</p>
-      <table class="logtable"><tr><th>Checked</th><th>Picture</th><th>Best match</th><th>Bigger copy</th><th>What happened</th></tr>${rows.map((r) => `<tr><td class="small muted">${new Date(r.ts * (r.ts < 1e12 ? 1000 : 1)).toLocaleString()}</td><td>${esc(r.name)}<div class="small muted">${r.w ? r.w + '×' + r.h : ''}</div></td><td>${esc(r.match || '—')}${r.similarity != null ? ` <span class="chip">${r.similarity}%</span>` : ''}</td><td>${r.hq ? `${r.hq.w}×${r.hq.h} (${r.hq.factor}×)` : '—'}</td><td>${esc(r.where || '—')}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Nothing has been looked up yet.</td></tr>'}</table></div>`;
-  },
-  async status() {
-    const el = $('#sstat'); if (!el) return; let st; try { st = await api('/sauce/stats'); } catch { return; }
-    const w = st.worker || {}; S.sauce = w; const sc = S.settings.saucenao || {}; const key = !!(sc.apiKey || sc.useIqdb !== false || sc.useAscii2d !== false);
-    el.textContent = `${st.queued} waiting · ${st.done} answered${st.error ? ` · ${st.error} failed` : ''}${w.running ? (w.paused ? ' · paused' : ' · working…') : ''}${key ? '' : ' · no lookup site turned on (Setup)'}`;
-    const p = $('#s_pause'); if (p) p.textContent = w.paused ? 'Resume' : 'Pause';
-  },
-  afterSauce() { Browse.refresh(); this.status(); },
-};
-
 // ---------- RULES ----------
 views.rules = {
   async render(el) {

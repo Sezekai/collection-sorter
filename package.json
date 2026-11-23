@@ -1,6 +1,6 @@
 {
   "name": "collection-sorter",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "description": "Review-first sorter for a large art, photo and video collection",
   "main": "app/main.js",
   "private": true,
@@ -16,7 +16,8 @@
     "sharp": "^0.35.5"
   },
   "devDependencies": {
-    "electron": "44.9.0"
+    "electron": "44.9.0",
+    "rcedit": "^4.0.1"
   },
   "electronVersion": "44.9.0"
 }

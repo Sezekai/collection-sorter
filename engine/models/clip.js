@@ -14,6 +14,7 @@ const dot = (a, b) => { let s = 0; for (let i = 0; i < a.length; i++) s += a[i] 
 class Clip {
   constructor(opts = {}) { this.opts = opts; this.tok = new ClipTokenizer(); this._q = Promise.resolve(); }
   _run(sess, feeds) { const r = this._q.then(() => sess.run(feeds)); this._q = r.catch(() => {}); return r; }
+  release() { for (const s of [this.vision, this.text]) try { if (s && s.release) s.release(); } catch { /* gone */ } this.vision = this.text = null; }
   async selfTest() { const t0 = Date.now(); const e = await this.embedPrepared([new Float32Array(3 * SIZE * SIZE)]); if (!e.length) throw new Error('CLIP returned nothing'); return { ms: Date.now() - t0 }; }
   async init(visionFile, textFile) {
     const v = await createSession(visionFile, this.opts);

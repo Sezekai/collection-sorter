@@ -1,7 +1,7 @@
 // =====================================================================================
 //  STATUS BAR, TITLE-BAR PILLS, LOG DRAWER  (STANDARDS.md "Progress you can trust", DESIGN.md "Status bar")
 // =====================================================================================
-const PHASES = { scan: 'Scanning folders', refscan: 'Scanning examples', refs: 'Learning from examples', analyze: 'Reading files', dupes: 'Finding duplicates', sets: 'Finding connected sets', decide: 'Choosing folders', move: 'Moving', undo: 'Putting back', sauce: 'Source lookup', download: 'Downloading models', models: 'Loading the AI models', rescan: 'Checking for changes', relocate: 'Moving data', diagnose: 'Diagnosing', done: 'Finished', error: 'Problem' };
+const PHASES = { scan: 'Scanning folders', refscan: 'Scanning examples', refs: 'Learning from examples', analyze: 'Reading files', dupes: 'Finding duplicates', sets: 'Finding connected sets', decide: 'Choosing folders', move: 'Moving', undo: 'Putting back', retag: 'Tagging again', download: 'Downloading models', models: 'Loading the AI models', rescan: 'Checking for changes', relocate: 'Moving data', diagnose: 'Diagnosing', done: 'Finished', error: 'Problem' };
 const hms = (sec) => { sec = Math.max(0, Math.round(sec || 0)); const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), x = sec % 60; return h ? `${h}:${String(m).padStart(2, '0')}:${String(x).padStart(2, '0')}` : `${m}:${String(x).padStart(2, '0')}`; };
 const STALL_S = 20;
 
@@ -71,7 +71,6 @@ const Status = {
   pills() {
     const host = $('#pills'); if (!host) return; const out = []; const i = this.info();
     if (i) out.push({ id: 'job', warn: i.stalled, text: `${i.name}${i.e.total ? ` ${fmtNum(i.e.done)}/${fmtNum(i.e.total)}` : ''}${i.e.note && !i.e.total ? ' · ' + i.e.note : ''}${i.queued ? ` · ${i.queued} queued` : ''}`, pct: i.unknown ? null : i.pct });
-    const sc = S.sauce; if (sc && sc.running) out.push({ id: 'sauce', text: `Source lookup${sc.paused ? ' · paused' : ''}${sc.done != null && sc.total ? ` ${fmtNum(sc.done)}/${fmtNum(sc.total)}` : ''}${sc.current ? ' · ' + sc.current : ''}`, pct: sc.total ? Math.min(99, Math.floor((sc.done / sc.total) * 100)) : null });
     host.innerHTML = out.map((p) => `<span class="pill ${p.warn ? 'warn' : ''}" data-pill="${p.id}" title="Click for the details"><span class="led"></span><span class="pt">${esc(p.text)}</span>${p.pct != null ? `<span class="mini"><i style="width:${p.pct}%"></i></span><span class="pc">${p.pct}%</span>` : ''}</span>`).join('');
     $$('[data-pill]', host).forEach((el) => (el.onclick = () => this.pop(el, el.dataset.pill)));
     const tp = $('#pillpop'); if (tp && tp.dataset.kind) this.pop(null, tp.dataset.kind, true);
@@ -80,19 +79,16 @@ const Status = {
     let m = $('#pillpop');
     if (m && !refresh && m.dataset.kind === kind) { m.remove(); return; }
     if (refresh && !m) return;
-    const i = this.info(); const sc = S.sauce || {};
-    if (kind === 'job' && !i) { if (m) m.remove(); return; }
-    if (kind === 'sauce' && !sc.running) { if (m) m.remove(); return; }
-    const rows = kind === 'job'
-      ? [['Job', i.name], ['Working on', i.on || '—'], ['Done', i.unknown ? 'size not known yet' : `${i.pct}%`], ['Time', i.times], i.model && ['Model', i.model], i.device && ['Running on', i.device], i.queued && ['Queued', (S.queue || []).map((q) => q.label).join(', ')], (i.steps || []).length && ['Steps', i.steps.map((s) => `${s.label}: ${s.state === 'done' ? 'done' : s.state === 'now' ? 'now' : 'queued'}`).join(' · ')]].filter(Boolean)
-      : [['Job', 'Source lookup'], ['State', sc.paused ? 'paused' : 'working'], sc.total && ['Done', `${fmtNum(sc.done || 0)} of ${fmtNum(sc.total)}`], sc.current && ['Picture', sc.current]].filter(Boolean);
+ const i = this.info();
+    if (!i) { if (m) m.remove(); return; }
+    const rows = [['Job', i.name], ['Working on', i.on || '—'], ['Done', i.unknown ? 'size not known yet' : `${i.pct}%`], ['Time', i.times], i.model && ['Model', i.model], i.device && ['Running on', i.device], i.queued && ['Queued', (S.queue || []).map((q) => q.label).join(', ')], (i.steps || []).length && ['Steps', i.steps.map((s) => `${s.label}: ${s.state === 'done' ? 'done' : s.state === 'now' ? 'now' : 'queued'}`).join(' · ')]].filter(Boolean);
     if (!m) { m = document.createElement('div'); m.id = 'pillpop'; m.className = 'pillpop'; document.body.appendChild(m); setTimeout(() => { const off = (e) => { if (!m.isConnected) return document.removeEventListener('pointerdown', off, true); if (!m.contains(e.target) && !e.target.closest('[data-pill],#sb_on')) { m.remove(); document.removeEventListener('pointerdown', off, true); } }; document.addEventListener('pointerdown', off, true); }, 0); }
     m.dataset.kind = kind;
-    m.innerHTML = `<div class="ttl">${esc(kind === 'job' ? i.name : 'Source lookup')}</div><div class="kvs">${rows.map(([k, v]) => `<span>${esc(k)}</span><span>${esc(String(v))}</span>`).join('')}</div><div class="row">${kind === 'job' ? `<button id="pp_pause">${this.paused ? 'Resume' : 'Pause'}</button><button id="pp_stop">Stop</button>` : '<button id="pp_go">Open Source lookup</button>'}<span class="grow"></span><button class="ghost" id="pp_log">${icon('log')}Log</button></div>`;
+    m.innerHTML = `<div class="ttl">${esc(i.name)}</div><div class="kvs">${rows.map(([k, v]) => `<span>${esc(k)}</span><span>${esc(String(v))}</span>`).join('')}</div><div class="row"><button id="pp_pause">${this.paused ? 'Resume' : 'Pause'}</button><button id="pp_stop">Stop</button><span class="grow"></span><button class="ghost" id="pp_log">${icon('log')}Log</button></div>`;
     if (anchor) { const r = anchor.getBoundingClientRect(); const w = Math.min(380, innerWidth - 16); m.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.right - w)) + 'px'; if (r.top > innerHeight / 2) { m.style.top = ''; m.style.bottom = innerHeight - r.top + 6 + 'px'; } else { m.style.bottom = ''; m.style.top = r.bottom + 6 + 'px'; } }
     const on = (id, fn) => { const b = $('#' + id, m); if (b) b.onclick = fn; };
     on('pp_pause', () => $('#sb_pause') && $('#sb_pause').click()); on('pp_stop', () => $('#sb_stop') && $('#sb_stop').click());
-    on('pp_go', () => { m.remove(); location.hash = '#sauce'; }); on('pp_log', () => { m.remove(); Log.open(); });
+    on('pp_log', () => { m.remove(); Log.open(); });
   },
 };
 setInterval(() => { if (Status.p) { Status.draw(); Status.pills(); } }, 1000);

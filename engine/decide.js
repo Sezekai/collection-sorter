@@ -307,8 +307,10 @@ async function decideAll(settings, rules, catalog, deps, onProgress) {
           if (realness !== r.realness || r.real_by !== by) realChanged.push(r.id);
           updReal.run(realness, op.clip ?? null, op.joytag ?? null, by, r.id);
           realWhy = by === 'you' ? ' (you marked it)' : ` (${modelName[by] || by} ${Math.round(pReal * 100)}% real life)`;
-          if (r.kind === 'video') { const v = videoFlow(f, emb, isReal); main = v; main.why += realWhy; lane = 'video'; }
-          else if (isReal) { main = photoFlow(f, emb, r); main.why += realWhy; lane = 'photo'; }
+          // real life is read with JoyTag's tags (the anime taggers only supply its rating)
+          const fr = isReal && r.jtags ? { g: classify.mapOf(r.jtags), c: new Map(), y: new Map(), emb: null } : f;
+          if (r.kind === 'video') { const v = videoFlow(fr, emb, isReal); main = v; main.why += realWhy; lane = 'video'; }
+          else if (isReal) { main = photoFlow(fr, emb, r); main.why += realWhy; lane = 'photo'; }
           else {
             const a = artFlow(f, emb, r, false);
             main = { n: a.claim.n, s: a.claim.s, why: a.claim.why }; lane = a.claim.n ? 'art' : 'unsorted'; series = a.series;
@@ -329,7 +331,7 @@ async function decideAll(settings, rules, catalog, deps, onProgress) {
     if (onProgress) onProgress({ phase: 'decide', done, total });
     await new Promise((r) => setImmediate(r));
   }
-  if (realChanged.length) for (let i = 0; i < realChanged.length; i += 400) tagsMod.fill(realChanged.slice(i, i + 400)); // the picture's tags follow its new art / real side
+  for (let i = 0; i < realChanged.length; i += 10) { tagsMod.fill(realChanged.slice(i, i + 10)); await new Promise((r) => setImmediate(r)); } // the picture's tags follow its new art / real side
   return { total, realModel, scoreboard: sb, unmapped: [...unmapped].map(([series, v]) => ({ series, n: v.n })) };
 }
 

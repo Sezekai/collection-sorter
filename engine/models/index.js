@@ -1,9 +1,9 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
-const { WD14 } = require('./wd14');
+const { Tagger, SPECS } = require('./tagger');
 const { Clip } = require('./clip');
-const { modelPaths, missing, ensureModels, taggerKey, TAGGERS } = require('./download');
+const { modelPaths, missing, ensureModels, taggerKey, TAGGERS, taggerReady, taggerFiles } = require('./download');
 const { log } = require('../util');
 const { JoyTag } = require('./joytag');
 const { PHOTO_ART } = require('../prompts');
@@ -17,7 +17,7 @@ const short = (e) => String((e && e.message) || e).replace(/\s+/g, ' ').replace(
 async function loadModels(settings, dir, force) {
   const want = taggerKey(settings.tagger && settings.tagger.model);
   const base = { device: (settings.tagger && settings.tagger.device) || 'auto', batch: (settings.tagger && settings.tagger.batch) || 8 };
-  const order = [want, ...Object.keys(TAGGERS).filter((k) => k !== want && k === 'swinv2')];
+  const order = [want, ...Object.keys(TAGGERS).filter((k) => k !== want && taggerReady(dir, k))];   // another tagger that is on disk, if the chosen one won't start
   const notes = []; let lastErr = null;
   for (const key of order) {
     const p = modelPaths(dir, key);
@@ -26,21 +26,22 @@ async function loadModels(settings, dir, force) {
     if (base.device !== 'cpu') { // a big model with 8 pictures at once can crash a graphics card ("device removed"), so start small and step down
       const small = Math.min(base.batch, 4); attempts.length = 0;
       const cfgId = settings.tagger && Number.isInteger(settings.tagger.deviceId) ? settings.tagger.deviceId : -1;
-      const gpus = gpuOrder(listGpus());
-      const ids = cfgId >= 0 ? [{ id: cfgId, name: gpus.length ? (listGpus()[cfgId] || 'card ' + cfgId) : 'card ' + cfgId }] : gpus.length ? gpus.slice(0, 3) : [{ id: 0, name: 'default card' }];
-      if (ids.length > 1 || gpus.length) log('graphics cards: ' + listGpus().map((n, i) => i + '=' + n).join(' | ') + ' -> trying ' + ids.map((g) => g.id + ' ' + g.name).join(', '));
+      const names = await listGpus(); const gpus = gpuOrder(names);
+      const ids = cfgId >= 0 ? [{ id: cfgId, name: gpus.length ? (names[cfgId] || 'card ' + cfgId) : 'card ' + cfgId }] : gpus.length ? gpus.slice(0, 3) : [{ id: 0, name: 'default card' }];
+      if (ids.length > 1 || gpus.length) log('graphics cards: ' + names.map((n, i) => i + '=' + n).join(' | ') + ' -> trying ' + ids.map((g) => g.id + ' ' + g.name).join(', '));
       ids.forEach((g, i) => { attempts.push({ ...base, deviceId: g.id, gpuName: g.name, batch: small }); if (small > 2) attempts.push({ ...base, deviceId: g.id, gpuName: g.name, batch: 2 }); if (small > 1 || i > 0) attempts.push({ ...base, deviceId: g.id, gpuName: g.name, batch: 1 }); });
       attempts.push({ ...base, device: 'cpu', batch: 4 });
     }
     for (const opts of attempts) {
+      const made = [];
       try {
-        const wd = await new WD14(opts).init(p.wd14, p.wd14tags);
-        const clip = await new Clip({ ...opts, device: 'cpu' }).init(p.clipv, p.clipt); // small model: the processor is fast enough and it keeps the card free for the tagger
+        const wd = await new Tagger(SPECS[key], opts).init(p.wd14, p.wd14tags);
+        made.push(wd); const clip = await new Clip({ ...opts, device: 'cpu' }).init(p.clipv, p.clipt); made.push(clip); // small model: the processor is fast enough and it keeps the card free for the tagger
         const t1 = await wd.selfTest(); const t2 = await clip.selfTest();
         let photoEmb = null; try { photoEmb = await clip.embedTexts(PHOTO_ART); } catch (e) { log('models: photo prompts failed: ' + e.message); }
         let jt = null, t3 = null;
         if ((settings.classify || {}).useJoytag !== false && fs.existsSync(p.joy) && fs.existsSync(p.joytags)) {
-          try { jt = await new JoyTag({ ...opts }).init(p.joy, p.joytags); t3 = await jt.selfTest(); }
+          try { jt = await new JoyTag({ ...opts }).init(p.joy, p.joytags); made.push(jt); t3 = await jt.selfTest(); }
           catch (e) { jt = null; notes.push(`JoyTag could not start (${short(e)}); photos and art are told apart by CLIP only.`); log('models: JoyTag failed: ' + (e.stack || e.message)); }
         }
         if (wd.recovered) notes.push(`The graphics card crashed while tagging (${short({ message: wd.batchNote })}); the tagger was restarted ${wd.recovered === 'cpu' ? 'on the processor' : 'one picture at a time'}.`);
@@ -52,6 +53,7 @@ async function loadModels(settings, dir, force) {
         log(`models ready: ${key} on ${wd.provider}, tagger ${t1.ms} ms, clip ${t2.ms} ms for a test picture`);
         return { wd, clip, jt, photoEmb, provider: wd.provider, key, gpu: opts.gpuName || '', note, ms: { tagger: t1.ms, clip: t2.ms, joytag: t3 && t3.ms } };
       } catch (e) {
+        for (const x of made) try { x.release(); } catch { /* gone */ }
         lastErr = e; log(`models: ${key} ${opts.device}/batch ${opts.batch} failed: ${e.stack || e.message}`);
         notes.push(`${TAGGERS[key].label} on ${opts.device === 'cpu' ? 'the processor' : opts.gpuName ? 'the ' + opts.gpuName : 'the graphics card'} with ${opts.batch} at a time failed: ${short(e)}.`);
       }
@@ -60,4 +62,15 @@ async function loadModels(settings, dir, force) {
   const err = new Error('The AI models would not start. ' + notes.slice(-3).join(' ') + ' Details are in engine.log.'); err.cause = lastErr; throw err;
 }
 
-module.exports = { loadModels, modelDir, missing, ensureModels, modelPaths, taggerKey, TAGGERS };
+// One more tagger next to the loaded models (to tag pictures again with another tagger). Same card and settings as the main one.
+async function loadTagger(settings, dir, key, like) {
+  const files = taggerFiles(key); const fm = files.find((f) => f.key === 'wd14'), ft = files.find((f) => f.key === 'wd14tags');
+  if (!taggerReady(dir, key)) { const e = new Error(`${TAGGERS[key].short} is not downloaded yet.`); e.code = 'models_missing'; throw e; }
+  const opts = { device: like && like.wd && like.wd.provider === 'cpu' ? 'cpu' : ((settings.tagger && settings.tagger.device) || 'auto'), deviceId: like && like.wd ? like.wd.deviceId : 0, batch: SPECS[key].batch };
+  const t = await new Tagger(SPECS[key], opts).init(path.join(dir, fm.dest), path.join(dir, ft.dest));
+  try { await t.selfTest(); } catch (e) { t.release(); throw e; }
+  log(`extra tagger ready: ${key} on ${t.provider}`);
+  return t;
+}
+function releaseModels(m) { if (!m) return; for (const x of [m.wd, m.clip, m.jt]) try { if (x && x.release) x.release(); } catch { /* gone */ } }
+module.exports = { loadTagger, releaseModels, loadModels, modelDir, missing, ensureModels, modelPaths, taggerKey, TAGGERS };

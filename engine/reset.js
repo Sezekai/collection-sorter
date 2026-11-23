@@ -12,7 +12,7 @@ function delFiles(ids) {
   for (let i = 0; i < ids.length; i += 400) {
     const chunk = ids.slice(i, i + 400), q = chunk.map(() => '?').join(',');
     db.tx(() => {
-      for (const t of ['emb:file_id', 'file_tags:file_id', 'suggestions:file_id', 'set_members:file_id', 'dupe_members:file_id']) { const [tb, col] = t.split(':'); d.prepare(`delete from ${tb} where ${col} in (${q})`).run(...chunk); }
+      for (const t of ['emb:file_id', 'file_tags:file_id', 'tagsets:file_id', 'suggestions:file_id', 'set_members:file_id', 'dupe_members:file_id']) { const [tb, col] = t.split(':'); d.prepare(`delete from ${tb} where ${col} in (${q})`).run(...chunk); }
       d.prepare(`delete from files where id in (${q})`).run(...chunk);
     });
     for (const id of chunk) { try { fs.unlinkSync(path.join(thumbsDir(), id + '.jpg')); } catch { /* none */ } }
@@ -37,7 +37,7 @@ function cleanup(settings) {
   delFiles(gone);
   const roots = [...(settings.referenceRoots || []), ...(settings.keptReferenceRoots || [])].filter(Boolean).map(pkey);
   const badRefs = d.prepare('select id,path from refs').all().filter((r) => { const k = pkey(r.path); return !roots.some((x) => k.startsWith(x + '/')); }).map((r) => r.id);
-  for (let i = 0; i < badRefs.length; i += 400) { const c = badRefs.slice(i, i + 400); d.prepare(`delete from refs where id in (${c.map(() => '?').join(',')})`).run(...c); }
+  for (let i = 0; i < badRefs.length; i += 400) { const c = badRefs.slice(i, i + 400); d.prepare(`delete from refs where id in (${c.map(() => '?').join(',')})`).run(...c); d.prepare(`delete from ref_tagsets where ref_id in (${c.map(() => '?').join(',')})`).run(...c); }
   return { filesRemoved: gone.length, examplesRemoved: badRefs.length };
 }
 
@@ -49,21 +49,20 @@ const WHAT = {
   // suggestions: delete them all (they are rebuilt by "Re-run suggestions")
   suggestions() { db.get().exec(`delete from suggestions where state!='moved'`); return 'Suggestions cleared. Press "Re-run suggestions" to rebuild them.'; },
   // forget how every file was read (tags, embeddings) so it is read again
-  analysis() { db.kvSet('taggerUsed', null); const d = db.get(); d.exec(`delete from emb; delete from file_tags; delete from suggestions where state!='moved'; delete from set_members; delete from sets_; delete from dupe_members; delete from dupe_groups; update files set analyzed=0, err=null, tags=null, fp=null, sha=null where status='new'`); clearThumbs(); return 'Every file will be read again on the next "Scan & analyse".'; },
+  analysis() { db.kvSet('taggerUsed', null); const d = db.get(); d.exec(`delete from emb; delete from file_tags; delete from tagsets where file_id in (select id from files where status='new'); delete from suggestions where state!='moved'; delete from set_members; delete from sets_; delete from dupe_members; delete from dupe_groups; update files set analyzed=0, err=null, tags=null, fp=null, sha=null where status='new'`); clearThumbs(); return 'Every file will be read again on the next "Scan & analyse".'; },
   // forget the file list itself (full re-scan)
-  files() { db.kvSet('taggerUsed', null); const d = db.get(); d.exec(`delete from emb; delete from file_tags; delete from suggestions where state!='moved'; delete from set_members; delete from sets_; delete from dupe_members; delete from dupe_groups; delete from files where status='new'`); clearThumbs(); return 'The file list was cleared. The next scan starts from nothing.'; },
-  examples() { db.get().exec('delete from refs'); return 'All learned examples were cleared.'; },
-  examplesLearning() { db.get().exec('update refs set analyzed=0, tags=null, v=null, metrics=null, rating=null'); return 'Examples will be re-learned on the next "Scan & analyse".'; },
+  files() { db.kvSet('taggerUsed', null); const d = db.get(); d.exec(`delete from emb; delete from file_tags; delete from tagsets where file_id in (select id from files where status='new'); delete from suggestions where state!='moved'; delete from set_members; delete from sets_; delete from dupe_members; delete from dupe_groups; delete from files where status='new'`); clearThumbs(); return 'The file list was cleared. The next scan starts from nothing.'; },
+  examples() { db.get().exec('delete from refs; delete from ref_tagsets'); return 'All learned examples were cleared.'; },
+  examplesLearning() { db.get().exec('update refs set analyzed=0, tags=null, v=null, metrics=null, rating=null; delete from ref_tagsets'); return 'Examples will be re-learned on the next "Scan & analyse".'; },
   series() { db.get().exec('delete from series_map'); return 'Series-to-folder assignments cleared.'; },
   rules() { db.kvSet('rules', null); return 'Rules and ranking are back to the built-in defaults.'; },
-  sauce() { db.get().exec('delete from sauce'); return 'Source lookup answers and queue cleared.'; },
   thumbs() { return `Removed ${clearThumbs()} cached thumbnails (they rebuild when needed).`; },
   prompts() { db.kvSet('promptEmbs', null); return 'Cached text descriptions cleared.'; },
   history() { db.get().exec('delete from journal; delete from batches'); return 'Move history cleared. Files already moved can no longer be undone from the app.'; },
   settings() { settingsMod.replace({}); return 'Settings are back to the recommended values.'; },
   everything() {
     const d = db.get();
-    for (const t of ['files', 'emb', 'file_tags', 'labels', 'refs', 'suggestions', 'sets_', 'set_members', 'dupe_groups', 'dupe_members', 'series_map', 'sauce', 'kv']) d.exec(`delete from ${t}`);
+    for (const t of ['files', 'emb', 'file_tags', 'labels', 'refs', 'suggestions', 'sets_', 'set_members', 'dupe_groups', 'dupe_members', 'series_map', 'sauce', 'tagsets', 'ref_tagsets', 'kv']) d.exec(`delete from ${t}`);
     clearThumbs();
     return 'Everything the app learned was cleared (settings, models and move history were kept).';
   },

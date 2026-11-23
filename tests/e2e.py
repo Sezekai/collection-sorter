@@ -27,7 +27,7 @@ try:
     with sync_playwright() as pw:
         b = pw.chromium.launch(); pg = b.new_page(viewport={'width': 1500, 'height': 900})
         pg.on('console', lambda m: errors.append(m.text) if m.type == 'error' else None); pg.on('pageerror', lambda e: errors.append(str(e)))
-        for route in ['setup', 'review', 'sets', 'dupes', 'unmapped', 'sauce', 'rules', 'undo', 'tags', 'fhq', 'unsorted']:
+        for route in ['setup', 'review', 'sets', 'dupes', 'unmapped', 'rules', 'undo', 'tags', 'unsorted']:
             pg.goto(f'{base}/?t=tok123#{route}'); pg.wait_for_timeout(1200 if route == 'review' else 700)
             pg.screenshot(path=f'{ROOT}/shot_{route}.png')
         # review interactions: select two, approve, open viewer
