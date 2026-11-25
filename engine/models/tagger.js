@@ -24,7 +24,7 @@ const SPECS = {
     label: 'PixAI v1.0 (31,000 tags, reads at 1008 px: most detailed but slowest; about 0.95 GB)', short: 'PixAI', repo: 'Mexes/pixai-tagger-v1.0-onnx-fp32-fp16-int8', dir: 'pixai-v1',
     files: [{ key: 'model', file: 'model_fp16.onnx', size: 947e6 }, { key: 'tags', file: 'selected_tags.csv', size: 0.8e6 }],
     size: 1008, layout: 'nchw', order: 'rgb', unit: 1 / 255, mean: [0.5, 0.5, 0.5], std: [0.5, 0.5, 0.5], pad: [0, 0, 0], fit: 'letterbox', kernel: 'cubic', sigmoid: false, tagList: 'csv',
-    keep: { general: 0.15, character: 0.2, copyright: 0.2, artist: 0.15 }, batch: 2,
+    keep: { general: 0.17, character: 0.27, copyright: 0.24, artist: 0.15 }, batch: 1, cpuRamGB: 9,   // reads at 1008 px: one picture needs ~4 GB on the card, ~7 GB of memory on the processor
   },
   camie: {
     label: 'Camie v2 (70,000 tags; about 0.8 GB)', short: 'Camie', repo: 'Camais03/camie-tagger-v2', dir: 'camie-v2',
@@ -74,7 +74,8 @@ class Tagger {
   // one run at a time on the session: parallel runs make DirectML run out of memory or fail outright
   _run(feeds) { const r = this._q.then(() => this.session.run(feeds)); this._q = r.catch(() => {}); return r; }
   async recover() {
-    const tries = this.provider === 'cpu' ? [] : [{ device: this.opts.device, label: 'gpu1' }, { device: 'cpu', label: 'cpu' }];
+    const cpuOk = !this.spec.cpuRamGB || require('os').totalmem() / 1e9 >= this.spec.cpuRamGB + 4;   // PixAI on a small PC would take the engine down
+    const tries = this.provider === 'cpu' ? [] : [{ device: this.opts.device, label: 'gpu1' }, ...(cpuOk ? [{ device: 'cpu', label: 'cpu' }] : [])];
     if (this.provider === 'cpu' && this.batch > 1) { this.batch = 1; return true; }
     for (const t of tries) {
       try { const old = this.session; const r = await createSession(this.modelFile, { ...this.opts, device: t.device }); this.session = r.session; this.provider = r.provider; this.batch = 1; this.recovered = t.label === 'cpu' ? 'cpu' : 'gpu1'; this._q = Promise.resolve(); if (old && old.release) old.release(); return true; } catch { /* next */ }

@@ -1,6 +1,6 @@
 {
   "name": "collection-sorter",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "description": "Review-first sorter for a large art, photo and video collection",
   "main": "app/main.js",
   "private": true,
