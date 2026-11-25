@@ -234,11 +234,18 @@ async function retagWork(which, ctl) {
   const total = rows.length; if (!total) return { tagged: 0, failed: 0 };
   const label = isJoy ? 'JoyTag' : (models.TAGGERS[key] || {}).short || key;
   emit({ phase: 'retag', done: 0, total, note: `Loading ${label}…` });
-  const m = await getModels(); startGpuWatch();
-  let tagger = null, own = false;
-  if (isJoy) { if (!m.jt) throw new Error('JoyTag is not loaded (it may be turned off, or not downloaded).'); tagger = m.jt; }
-  else if (m.key === key) tagger = m.wd;
-  else { tagger = await models.loadTagger(S, modelDir(), key, m); own = true; }
+  let tagger = null, own = false; startGpuWatch();
+  if (isJoy || (state.models && state.models.key === key) || (!state.models && key === sortK)) {
+    const m = await getModels();
+    if (isJoy) { if (!m.jt) throw new Error('JoyTag is not loaded (it may be turned off, or not downloaded).'); tagger = m.jt; }
+    else if (m.key === key) tagger = m.wd;
+  }
+  if (!tagger) {
+    // another tagger: put the loaded models away first so it has the whole graphics card (PixAI alone needs ~5 GB of it); they load again when next needed
+    const like = state.models ? { provider: state.models.wd && state.models.wd.provider, deviceId: state.models.wd && state.models.wd.deviceId } : null;
+    dropModels();
+    tagger = await models.loadTagger(S, modelDir(), key, like); own = true;
+  }
   const { load, mergeFrames } = require('./analyze'); const tagsMod = require('./tags');
   let done = 0, failed = 0, firstErr = ''; const touched = [];
   try {
